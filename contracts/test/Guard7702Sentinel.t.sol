@@ -69,4 +69,27 @@ contract Guard7702SentinelTest is Test {
         uint256 bitmap = permit2.nonceBitmap(owner, 4);
         assertEq(bitmap, 2, "Bitmap bit 1 must be set to 1");
     }
+
+    function test_revert_when_attacker_calls_delegated_sentinel() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        address[] memory spenders = new address[](1);
+        spenders[0] = spender;
+        uint48[] memory newNonces = new uint48[](1);
+        newNonces[0] = 5;
+
+        uint64 ownerNonce = uint64(vm.getNonce(owner));
+        Vm.SignedDelegation memory auth = vm.signDelegation(
+            address(sentinel),
+            ownerKey,
+            ownerNonce
+        );
+        vm.attachDelegation(auth);
+
+        // Attacker attempts to call victim's delegated sentinel directly to grief/DoS nonces
+        address attacker = address(0x9999);
+        vm.prank(attacker);
+        vm.expectRevert("Guard7702: only self");
+        Guard7702Sentinel(payable(owner)).batchInvalidateNonces(address(permit2), tokens, spenders, newNonces);
+    }
 }

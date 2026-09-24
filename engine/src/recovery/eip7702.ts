@@ -2,11 +2,12 @@ import { PublicClient, Address, Hex } from "viem";
 import { EIP7702Capability } from "../capability/types.js";
 
 export interface EIP7702RecoveryAction {
-  strategy: "ADVANCE_NONCE" | "CLEAR_DELEGATION" | "NOOP";
+  strategy: "ADVANCE_NONCE" | "CLEAR_DELEGATION" | "FUTURE_NONCE_MULTI_ADVANCE" | "NOOP";
   description: string;
   target: Address;
   calldata: Hex;
   actor: Address;
+  requiredAdvances?: number;
   recoveryDelegation?: {
     address: Address;
     chainId: number;
@@ -44,23 +45,40 @@ export class EIP7702RecoveryPlanner {
       };
     }
 
-    // Case 2: Unconsumed authorization -> Advance account nonce
-    if (BigInt(currentNonce) <= capability.nonce) {
+    // Case 2: Unconsumed authorization -> Check nonce relationship
+    const capNonce = BigInt(capability.nonce);
+    const currNonce = BigInt(currentNonce);
+
+    if (currNonce > capNonce) {
       return {
-        strategy: "ADVANCE_NONCE",
-        description: `Owner executes self-transaction to increment account nonce from ${currentNonce} to ${currentNonce + 1}, invalidating stolen authorization`,
+        strategy: "NOOP",
+        description: `Stolen authorization already invalidated by higher account nonce (${currNonce} > ${capNonce}); no active delegation detected`,
         target: owner,
         calldata: "0x",
         actor: owner
       };
     }
 
+    if (currNonce === capNonce) {
+      return {
+        strategy: "ADVANCE_NONCE",
+        description: `Owner executes self-transaction to increment account nonce from ${currNonce} to ${currNonce + 1n}, invalidating stolen authorization via nonce mismatch`,
+        target: owner,
+        calldata: "0x",
+        actor: owner,
+        requiredAdvances: 1
+      };
+    }
+
+    // currNonce < capNonce: Future nonce requires advancing to capNonce + 1
+    const needed = Number(capNonce - currNonce + 1n);
     return {
-      strategy: "NOOP",
-      description: "Stolen authorization already invalidated by higher account nonce; no active delegation detected",
+      strategy: "FUTURE_NONCE_MULTI_ADVANCE",
+      description: `Future-nonce authorization detected (current: ${currNonce}, target: ${capNonce}). Requires advancing account nonce by ${needed} to ${capNonce + 1n} to permanently neutralize`,
       target: owner,
       calldata: "0x",
-      actor: owner
+      actor: owner,
+      requiredAdvances: needed
     };
   }
 }

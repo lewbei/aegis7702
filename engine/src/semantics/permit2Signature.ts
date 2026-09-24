@@ -8,6 +8,11 @@ export class Permit2SignatureSemantics {
     client: PublicClient,
     attacker: `0x${string}`
   ): Promise<Action[]> {
+    // Only the authorized spender can execute the resulting transfer
+    if (attacker.toLowerCase() !== capability.spender.toLowerCase()) {
+      return [];
+    }
+
     const actions: Action[] = [];
     const token = capability.permitted.token;
     const owner = capability.owner;

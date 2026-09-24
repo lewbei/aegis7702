@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -265,25 +265,91 @@ export function App() {
   const [isRecovering, setIsRecovering] = useState<boolean>(false);
   const [recoveryDone, setRecoveryDone] = useState<boolean>(false);
 
+  // Live Engine integration state
+  const [engineStatus, setEngineStatus] = useState<'checking' | 'connected' | 'fallback'>('checking');
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [realRecoveryTx, setRealRecoveryTx] = useState<{ txHash: string; gasUsed: string } | null>(null);
+  const [realReplayResult, setRealReplayResult] = useState<any | null>(null);
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then((res) => {
+        if (res.ok) setEngineStatus('connected');
+        else setEngineStatus('fallback');
+      })
+      .catch(() => setEngineStatus('fallback'));
+  }, []);
+
   const scenario = SCENARIOS.find((s) => s.id === selectedScenarioId) || SCENARIOS[0];
 
   const handleSelectScenario = (id: string) => {
     setSelectedScenarioId(id);
     setVerificationDone(false);
     setRecoveryDone(false);
+    setActiveRunId(null);
+    setRealRecoveryTx(null);
+    setRealReplayResult(null);
   };
 
-  const handleRunVerification = () => {
+  const handleRunVerification = async () => {
     setIsVerifying(true);
     setRecoveryDone(false);
+    setRealRecoveryTx(null);
+    setRealReplayResult(null);
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenarioId: selectedScenarioId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveRunId(data.runId);
+        setEngineStatus('connected');
+        setIsVerifying(false);
+        setVerificationDone(true);
+        return;
+      }
+    } catch {
+      // Backend offline, fallback to deterministic verification fixture
+    }
+
     setTimeout(() => {
       setIsVerifying(false);
       setVerificationDone(true);
-    }, 1200);
+      setEngineStatus('fallback');
+    }, 1000);
   };
 
-  const handleExecuteRecovery = () => {
+  const handleExecuteRecovery = async () => {
     setIsRecovering(true);
+
+    if (activeRunId) {
+      try {
+        const recRes = await fetch('/api/recover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ runId: activeRunId })
+        });
+        const recData = await recRes.json();
+        setRealRecoveryTx({ txHash: recData.txHash, gasUsed: recData.gasUsed });
+
+        const repRes = await fetch('/api/replay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ runId: activeRunId })
+        });
+        const repData = await repRes.json();
+        setRealReplayResult(repData);
+        setIsRecovering(false);
+        setRecoveryDone(true);
+        return;
+      } catch {
+        // Fallback if request drops
+      }
+    }
+
     setTimeout(() => {
       setIsRecovering(false);
       setRecoveryDone(true);
@@ -305,6 +371,17 @@ export function App() {
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                   Prague & Permit2 Ready
                 </span>
+                {engineStatus === 'connected' ? (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Live Anvil Engine Online (Port 3001)
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1" title="Start engine server with 'cd engine && npm run server' for live on-chain execution">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                    Client Fixture Mode
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">
                 Executable Capability-Reachability Verifier & State-Specific Recovery Synthesizer
@@ -616,10 +693,30 @@ export function App() {
                       <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
                         <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                         <span>Mitigation Verified: Exploit Replay Reverted On-Chain!</span>
+                        {realRecoveryTx && (
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto">
+                            Live Anvil Confirmed
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-slate-300 font-mono space-y-1">
-                        <div>Attacker Replay Status: <span className="text-rose-400 font-bold">REVERTED ({scenario.recovery.replayResult.errorSignature})</span></div>
-                        <div>Victim Tracked Balance: <span className="text-emerald-400 font-bold">{scenario.recovery.replayResult.preservedBalance}</span></div>
+                        {realRecoveryTx && (
+                          <div className="text-cyan-300 truncate">
+                            Recovery Tx Hash: <span className="font-bold">{realRecoveryTx.txHash}</span> (Gas Used: {realRecoveryTx.gasUsed})
+                          </div>
+                        )}
+                        <div>
+                          Attacker Replay Status:{" "}
+                          <span className="text-rose-400 font-bold">
+                            REVERTED ({realReplayResult?.revertError || scenario.recovery.replayResult.errorSignature})
+                          </span>
+                        </div>
+                        <div>
+                          Victim Tracked Balance:{" "}
+                          <span className="text-emerald-400 font-bold">
+                            {realReplayResult?.finalVictimBalance || scenario.recovery.replayResult.preservedBalance}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}

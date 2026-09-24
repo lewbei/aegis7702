@@ -16,6 +16,7 @@ import { spawn, ChildProcess } from "child_process";
 import { ReachabilityExplorer } from "./search/explorer.js";
 import { Permit2RecoveryPlanner } from "./recovery/permit2.js";
 import { Permit2AllowanceCapability } from "./capability/types.js";
+import { decodePermit2Allowance } from "./capability/decodePermit2Allowance.js";
 import { PERMIT2_ABI, ERC20_ABI } from "./capability/abis.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -28,9 +29,10 @@ const VICTIM_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae
 const victimAccount = privateKeyToAccount(VICTIM_PRIVATE_KEY);
 const victim = victimAccount.address;
 const attacker: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const ANVIL_BIN = process.env.ANVIL_BIN ?? "anvil";
 
 async function startAnvil(): Promise<ChildProcess> {
-  const anvil = spawn("/home/lewbei/.foundry/bin/anvil", [
+  const anvil = spawn(ANVIL_BIN, [
     "--port",
     ANVIL_PORT.toString(),
     "--silent"
@@ -192,23 +194,16 @@ async function runKillTest() {
 
     const signature = await walletClient.signTypedData(typeData);
 
-    const capability: Permit2AllowanceCapability = {
-      kind: "PERMIT2_ALLOWANCE",
+    // Decode raw wallet signing payload into typed capability via Capability Decoder
+    const capability: Permit2AllowanceCapability = decodePermit2Allowance({
       owner: victim,
-      chainId: 31337n,
-      permit2Address,
-      details: {
-        token: usdcAddress,
-        amount: DRAIN_AMOUNT,
-        expiration,
-        nonce: 0
-      },
-      spender: attacker,
-      sigDeadline,
+      domain: typeData.domain,
+      types: typeData.types,
+      message: typeData.message,
       signature
-    };
+    });
 
-    console.log("  -> Signed capability created.");
+    console.log("  -> Signed capability decoded via Capability Decoder.");
 
     // Evaluate 1-Step Baseline
     console.log("\n[4/7] Evaluating 1-Step Baseline (Current Execution State):");

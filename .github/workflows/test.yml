@@ -1,0 +1,74 @@
+name: Test Suite & Verification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  contracts:
+    name: Foundry Solidity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Run Forge Tests
+        working-directory: contracts
+        run: forge test -v
+
+  engine:
+    name: TypeScript Reachability Engine Kill Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry (for Anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Build Contracts for Artifacts
+        working-directory: contracts
+        run: forge build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Engine Dependencies
+        working-directory: engine
+        run: npm install
+
+      - name: Run Engine Kill Tests
+        working-directory: engine
+        run: npm test
+
+  app:
+    name: React Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Frontend Dependencies
+        working-directory: app
+        run: npm install
+
+      - name: Build Frontend
+        working-directory: app
+        run: npm run build

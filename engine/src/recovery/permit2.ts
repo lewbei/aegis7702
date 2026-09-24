@@ -27,9 +27,9 @@ export class Permit2RecoveryPlanner {
       args: [owner, token, spender]
     });
 
-    // Case A: Pending/unconsumed permit
-    if (currentNonce === capability.details.nonce) {
-      const newNonce = currentNonce + 1;
+    // Case A: Pending/unconsumed permit (current or future signed nonce)
+    if (capability.details.nonce >= currentNonce) {
+      const newNonce = capability.details.nonce + 1;
       const calldata = encodeFunctionData({
         abi: PERMIT2_ABI,
         functionName: "invalidateNonces",
@@ -38,7 +38,7 @@ export class Permit2RecoveryPlanner {
 
       return {
         strategy: "INVALIDATE_NONCE",
-        description: `Owner calls invalidateNonces(token, spender, ${newNonce}) advancing nonce to prevent permit consumption`,
+        description: `Owner calls invalidateNonces(token, spender, ${newNonce}) advancing nonce past signed nonce (${capability.details.nonce}) to prevent permit consumption`,
         target: permit2,
         calldata,
         actor: owner

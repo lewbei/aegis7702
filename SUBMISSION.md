@@ -1,4 +1,4 @@
-# Aegis7702 (Guard7702): Bounded Capability-Reachability Verifier & Recovery Engine
+# Aegis7702: Bounded Capability-Reachability Verifier & Recovery Engine
 
 **Project Name:** Aegis7702  
 **Tagline / Elevator Pitch:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified 1-click on-chain recovery.
@@ -31,7 +31,7 @@ Conventional simulation only reveals what a proposed execution does under a part
 
 Instead of outputting ambiguous, probabilistic "AI risk scores", Aegis7702 executes a closed-loop deterministic verification protocol against live EVM state snapshots:
 
-1. **Typed Capability Extraction:** Decodes signed authorization payloads into structured capabilities $c \in \mathcal{C}$ across three supported domains:
+1. **Typed Capability Extraction & Decoding:** Ingests raw wallet signing payloads via dedicated Capability Decoders (`decodePermit2Allowance`, `decodePermit2Signature`, `decode7702`) into structured capabilities $c \in \mathcal{C}$ across three supported domains:
    - EIP-7702 Ephemeral Delegation Tuples
    - Uniswap Permit2 `AllowanceTransfer` (`PermitSingle` / `PermitBatch`)
    - Uniswap Permit2 `SignatureTransfer` (Unordered Nonce Bitmaps)
@@ -39,11 +39,12 @@ Instead of outputting ambiguous, probabilistic "AI risk scores", Aegis7702 execu
    $$\text{Unsafe}_{\le k}^{\mathcal A_{\text{modeled}}}(c, s_0) \iff \exists \pi = (a_1, \ldots, a_j), \, j \le k \quad \text{such that} \quad L(s_0, T_\pi(s_0)) > 0$$
    where the loss function evaluates tracked asset deltas:
    $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t, \text{victim}}(s_0) - \text{Balance}_{t, \text{victim}}(s'))$$
+   *(In our MVP, this measures the primary capability-associated ERC-20 token, with multi-asset ETH/ERC-20 aggregate blast radius tracking in our roadmap).*
 3. **Executable Counterexample Witness:** When a loss path is discovered, Aegis7702 does not just alert the user; it returns the exact, reproducible multi-step exploit trace $\pi$ (e.g., `RelayAuthorization` $\to$ `MaliciousDelegate.sweep`).
 4. **State-Specific On-Chain Recovery Synthesis:** Inspects live chain state and automatically synthesizes the protocol-correct counter-transaction:
-   - *Unconsumed EIP-7702 Authorization:* Constructs a 0-value self-transaction to increment the victim's account nonce from $n \to n+1$. Because EIP-7702 strictly checks `authority.nonce == auth.nonce`, the stolen authorization is rendered unusable via protocol-level nonce mismatch.
+   - *Unconsumed EIP-7702 Authorization:* Constructs a 0-value self-transaction to increment the victim's account nonce from $n \to n+1$ (or multiple self-transactions if a future nonce was signed). Because EIP-7702 strictly checks `authority.nonce == auth.nonce`, the stolen authorization is rendered unusable via protocol-level nonce mismatch.
    - *Active EIP-7702 Delegation:* Constructs an EIP-7702 Type-4 transaction with authorization pointing to `address(0)` to wipe the `0xef0100...` delegation indicator back to a clean EOA.
-   - *Permit2 Allowance:* Calls canonical `Permit2.invalidateNonces()` to bump nonces before broadcast, or `Permit2.lockdown()` to zero active allowances.
+   - *Permit2 Allowance:* Calls canonical `Permit2.invalidateNonces()` to bump nonces past signed nonces before broadcast, or `Permit2.lockdown()` to zero active allowances.
    - *Permit2 Signature:* Calls `Permit2.invalidateUnorderedNonces(wordPos, mask)` to flip the bitmap word position, neutralizing the signature.
 5. **Deterministic On-Fork Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery fork state $s_R$ and proves on-chain that the exploit reverts:
    $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad \land \quad \text{Replay}(\pi, s_R) \text{ reverts}}$$
@@ -58,32 +59,36 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 ```
 .
 ├── contracts/                  # Solidity smart contracts & Foundry security suites
-│   ├── src/                    # Guard7702Sentinel, MaliciousDelegate, MockUSDC
+│   ├── src/                    # Guard7702Sentinel (with anti-griefing onlySelf), MaliciousDelegate, MockUSDC
 │   ├── test/                   # Permit2Allowance, Permit2Signature, EIP7702Attack, Guard7702Sentinel
 │   └── foundry.toml            # Solc 0.8.17, via_ir = true, Prague EVM settings
 │
-├── engine/                     # TypeScript Capability-Reachability Engine
-│   └── src/                    # Bounded DFS explorer (k ≤ 3), state-specific recovery synthesizer
+├── engine/                     # TypeScript Capability-Reachability Engine & API Server
+│   ├── src/capability/         # Dedicated decoders for raw wallet payloads (EIP-712 & EIP-7702)
+│   ├── src/search/             # Bounded DFS explorer (k ≤ 3) with EVM snapshots & reverts
+│   ├── src/recovery/           # State-specific recovery planners for EIP-7702 and Permit2
+│   └── src/server.ts           # HTTP API server bridging engine execution directly to the web dashboard
 │
-└── app/                        # Interactive Visualizer Dashboard (React 18 + Vite 8)
-    └── src/                    # Immediate-delta baseline contrast, graph view, 1-click on-fork recovery
+└── app/                        # Interactive Visualizer Dashboard (React 19 + Vite 8)
+    └── src/                    # Live Anvil RPC integration, baseline contrast, 1-click on-fork recovery
 ```
 
 * **Solidity Smart Contracts & Foundry Suite:**
-  - Implemented `Guard7702Sentinel.sol` to enable batch Permit2 nonce invalidations within delegated EOA execution contexts.
+  - Implemented `Guard7702Sentinel.sol` to enable batch Permit2 nonce invalidations within delegated EOA execution contexts, hardened with strict `onlySelf` anti-griefing caller protection.
   - Built `MaliciousDelegate.sol` and `MockUSDC.sol` as precise EVM fixtures for Prague code delegation attacks.
-  - Authored 4 comprehensive Foundry test suites comprising **13 tests with 100% pass rate** executing in 8ms:
+  - Authored 4 comprehensive Foundry test suites comprising **14 tests with 100% pass rate** executing in 13ms:
     - `Permit2AllowanceTest`: 4/4 passed (baseline zero-delta, multi-step drain discovery, nonce invalidation, lockdown).
     - `Permit2SignatureTest`: 3/3 passed (baseline zero-delta, signature drain, unordered nonce invalidation).
     - `EIP7702AttackTest`: 4/4 passed (baseline zero-delta, Type-4 drain, nonce advance recovery, `address(0)` clearance).
-    - `Guard7702SentinelTest`: 2/2 passed (delegated batch invalidations).
+    - `Guard7702SentinelTest`: 3/3 passed (delegated batch invalidations, attacker anti-griefing revert verification).
 * **TypeScript Reachability Engine:**
-  - Built on Viem and ephemeral Anvil child processes with `--hardfork prague`.
+  - Built on Viem and ephemeral Anvil child processes with `--hardfork prague` and portable binary configuration (`ANVIL_BIN`).
   - Implemented depth-first reachability exploration bounded at $k \le 3$, utilizing lightweight EVM snapshots (`evm_snapshot` / `evm_revert`) to keep branch exploration under 2 seconds.
-  - Authored 3 automated, self-contained **Kill Tests** (`killTest.ts`, `killTestSignature.ts`, `killTest7702.ts`) that execute completely offline with zero external RPC dependencies.
+  - Authored 3 automated, self-contained **Kill Tests** (`killTest.ts`, `killTestSignature.ts`, `killTest7702.ts`) that execute completely offline via `npm test` with zero external RPC dependencies.
+  - Built a lightweight HTTP backend server (`server.ts`) exposing `/api/analyze`, `/api/recover`, and `/api/replay` for real-time frontend execution on live ephemeral Anvil instances.
 * **Interactive Proof Visualizer Dashboard:**
-  - Built with React 18, Vite 8, Lucide, and Tailwind CSS.
-  - Displays the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and 1-click on-fork recovery execution.
+  - Built with React 19, Vite 8, Lucide, and Tailwind CSS.
+  - Connects directly to the live Anvil engine server, displaying the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and real on-chain recovery execution with live transaction hashes.
 
 ---
 
@@ -92,9 +97,9 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 1. **Combinatorial EVM State-Space Explosion:**
    Arbitrary EVM execution has an infinite branching factor ($2^{256}$ possible calldata permutations). Attempting generic state fuzzing in real-time is impossible. We solved this by formulating **typed capability semantics**: rather than brute-forcing arbitrary calls, the engine decodes the exact parameters of the capability (token addresses, spenders, nonces, delegation pointers) and instantiates only legal candidate actions ($\mathcal{A}_{\text{modeled}}$), bounding depth to $k \le 3$ (sufficient to cover *Relay $\to$ Drain $\to$ Unwind*).
 2. **Bleeding-Edge Prague Hardfork Tooling:**
-   EIP-7702 is newly deployed. Most developer tools, JSON-RPC endpoints, and wallet libraries do not yet have stable native abstractions for Type-4 transaction envelopes and `0xef0100` delegation bytecode. We had to build custom low-level RLP serializers, orchestrate Prague-configured Anvil instances, and write Foundry cheatcode harnesses (`vm.attachDelegation`) to model live delegation mechanics.
-3. **Permit2 Caller Identity Constraints:**
-   Canonical Permit2 security functions (`invalidateNonces`, `invalidateUnorderedNonces`, and `lockdown`) strictly operate on `msg.sender`. A third-party security contract cannot call them on a victim's behalf. We solved this by structuring recovery transactions to execute directly from the victim EOA or via an EIP-7702 delegated context where `msg.sender == victim`.
+   EIP-7702 is newly deployed. Most developer tools, JSON-RPC endpoints, and wallet libraries do not yet have stable native abstractions for Type-4 transaction envelopes and `0xef0100` delegation bytecode. We orchestrated Prague-configured Anvil instances, utilized Viem experimental authorization primitives and Type-4 serializers, and wrote Foundry cheatcode harnesses (`vm.attachDelegation`) to model live delegation mechanics.
+3. **Permit2 Caller Identity Constraints & Sentinel Griefing:**
+   Canonical Permit2 security functions strictly operate on `msg.sender`. While delegating to `Guard7702Sentinel` allows an EOA to batch-invalidate nonces with `address(this) == victim`, unauthenticated callers could potentially grief the victim by invalidating active nonces. We patched this vulnerability by enforcing a strict `onlySelf` modifier (`require(msg.sender == address(this))`), ensuring only transactions originating from the victim's account can execute Sentinel logic.
 4. **Formulating Asymmetric Mathematical Claims:**
    We strictly refused to make indefensible claims of "global safety." Because reachability search is bounded ($k \le 3$), we formalized the critical verification asymmetry:
    $$\boxed{\text{Found loss path} \implies \text{concrete vulnerability witness}}$$
@@ -108,7 +113,7 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 1. **Closed-Loop Verification & Recovery:**
    We did not just build a detector that alerts users. We built a closed-loop system: **Capability Extraction $\to$ Reachability Exploration $\to$ Concrete Exploit Witness $\to$ Recovery Synthesis $\to$ Replay Verification Reversion**.
 2. **100% Offline Reproducibility with Zero Flakiness:**
-   All 13 Foundry contract tests and all 3 TypeScript Anvil kill tests run completely offline without external RPC rate-limits, third-party API keys, or flaky network calls. The entire test suite completes in seconds.
+   All 14 Foundry contract tests and all 3 TypeScript Anvil kill tests run completely offline without external RPC rate-limits, third-party API keys, or flaky network calls. The entire test suite completes in seconds.
 3. **Formal Mathematical Grounding:**
    Directly addressing the USENIX Security 2026 empirical dataset and grounding the authorization architecture in the **Key Sovereignty** framework of Matthias Hauser (arXiv:2605.01210).
 4. **Production-Ready Dashboard UI:**

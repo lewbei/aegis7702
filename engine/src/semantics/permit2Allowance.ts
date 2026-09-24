@@ -8,6 +8,11 @@ export class Permit2AllowanceSemantics {
     client: PublicClient,
     attacker: `0x${string}`
   ): Promise<Action[]> {
+    // Only the authorized spender can execute the resulting allowance
+    if (attacker.toLowerCase() !== capability.spender.toLowerCase()) {
+      return [];
+    }
+
     const actions: Action[] = [];
     const token = capability.details.token;
     const owner = capability.owner;

@@ -14,6 +14,7 @@ import { spawn, ChildProcess } from "child_process";
 import { ReachabilityExplorer } from "./search/explorer.js";
 import { EIP7702RecoveryPlanner } from "./recovery/eip7702.js";
 import { EIP7702Capability } from "./capability/types.js";
+import { decode7702 } from "./capability/decode7702.js";
 import { ERC20_ABI, MALICIOUS_DELEGATE_ABI } from "./capability/abis.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -33,9 +34,10 @@ const victim = victimAccount.address;
 const ATTACKER_PRIVATE_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as Hex;
 const attackerAccount = privateKeyToAccount(ATTACKER_PRIVATE_KEY);
 const attacker = attackerAccount.address;
+const ANVIL_BIN = process.env.ANVIL_BIN ?? "anvil";
 
 async function startAnvil(): Promise<ChildProcess> {
-  const anvil = spawn("/home/lewbei/.foundry/bin/anvil", [
+  const anvil = spawn(ANVIL_BIN, [
     "--port",
     ANVIL_PORT.toString(),
     "--hardfork",
@@ -138,18 +140,17 @@ async function run7702KillTest() {
       nonce: victimNonce
     });
 
-    const capability: EIP7702Capability = {
-      kind: "EIP7702",
+    // Decode raw wallet authorization tuple via Capability Decoder
+    const capability: EIP7702Capability = decode7702({
       owner: victim,
-      chainId: 31337n,
-      delegateAddress,
-      nonce: BigInt(victimNonce),
+      chainId: auth.chainId,
+      address: (auth as any).contractAddress ?? (auth as any).address ?? delegateAddress,
+      nonce: auth.nonce,
       yParity: auth.yParity,
       r: auth.r,
       s: auth.s,
-      targetToken: usdcAddress,
-      authorizationObject: auth
-    };
+      targetToken: usdcAddress
+    });
 
     console.log("      Signed EIP-7702 Capability:");
     console.log(`        Authority (Owner): ${capability.owner}`);

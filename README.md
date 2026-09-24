@@ -73,9 +73,9 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 
 - **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Guard7702 executes each step on a live Anvil fork and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under current fork state $s_0$.
 - **Bounded Verification Limit:** When no loss path is found, Guard7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and under ~2 seconds. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
-- **Loss Metric Definition:** The loss function evaluates the net reduction in victim assets across state transitions:
+- **Loss Metric Definition:** The general loss formulation evaluates the net reduction in victim assets across state transitions:
   $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t,\text{victim}}(s_0) - \text{Balance}_{t,\text{victim}}(s'))$$
-  monitoring native ETH and tracked ERC-20 token balances for the victim EOA.
+  In the current MVP implementation, Guard7702 specifically tracks and measures the primary capability-associated ERC-20 token (e.g., USDC) to establish concrete counterexample witnesses with minimal overhead, with multi-asset ETH/ERC-20 aggregate blast radius tracking designated for subsequent production expansion.
 - **Action Space Bounds ($\mathcal{A}_{\text{modeled}}$):**
   - *In Scope / Modeled:* Canonical Permit2 `permit` and `permitTransferFrom` invocations, EIP-7702 Type-0x04 delegation relays, and direct token drain / delegation `sweep` calls.
   - *Out of Scope / Future Work:* Arbitrary external DeFi composability (flash-loan-assisted liquidations, multi-hop DEX arbitrage, nested protocol reentrancy).
@@ -119,8 +119,12 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 ├── engine/                     # TypeScript Capability-Reachability Engine
 │   ├── src/
 │   │   ├── capability/
-│   │   │   ├── types.ts        # Typed Capability, Action, SearchNode, Counterexample
-│   │   │   └── abis.ts         # Permit2, ERC20, and MaliciousDelegate ABIs
+│   │   │   ├── types.ts            # Typed Capability, Action, SearchNode, Counterexample
+│   │   │   ├── abis.ts             # Permit2, ERC20, and MaliciousDelegate ABIs
+│   │   │   ├── decodePermit2Allowance.ts # Wallet EIP-712 PermitSingle capability decoder
+│   │   │   ├── decodePermit2Signature.ts # Wallet EIP-712 PermitTransferFrom decoder
+│   │   │   ├── decode7702.ts       # EIP-7702 authorization tuple decoder
+│   │   │   └── decodeCapability.ts # Universal capability dispatcher
 │   │   ├── semantics/
 │   │   │   ├── permit2Allowance.ts # Permit2 AllowanceTransfer action generator
 │   │   │   ├── permit2Signature.ts # Permit2 SignatureTransfer action generator
@@ -131,6 +135,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 │   │   │   └── eip7702.ts          # Nonce advance & address(0) delegation planner
 │   │   ├── search/
 │   │   │   └── explorer.ts     # Bounded DFS explorer using Anvil snapshots & reverts
+│   │   ├── server.ts           # Lightweight HTTP API server bridging engine to web app
 │   │   ├── killTest.ts         # Permit2 AllowanceTransfer end-to-end kill test (100% PASS)
 │   │   ├── killTestSignature.ts# Permit2 SignatureTransfer end-to-end kill test (100% PASS)
 │   │   └── killTest7702.ts     # EIP-7702 Prague Hardfork end-to-end kill test (100% PASS)
@@ -138,7 +143,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 │
 └── app/                        # Interactive Next/Vite React Proof Visualizer Dashboard
     ├── src/
-    │   ├── App.tsx             # Interactive scenario runner, graph visualizer & replay tester
+    │   ├── App.tsx             # Interactive scenario runner, live Anvil execution & replay tester
     │   └── index.css           # Tailwind CSS v4 cyberpunk/fintech dark theme
     └── package.json
 ```
@@ -153,7 +158,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 - *Offline Execution:* All test suites and benchmarks execute completely offline against local Anvil state without requiring external RPC keys or mainnet connectivity.
 
 ### Step 1: Run Foundry Solidity Test Suite
-Verify all 13 smart contract security tests covering baseline delta, multi-step exploit execution, and mitigation:
+Verify all 14 smart contract security tests covering baseline delta, multi-step exploit execution, caller authorization checks, and mitigation:
 
 ```bash
 cd contracts
@@ -165,35 +170,40 @@ Expected output:
 Ran 3 tests for test/Permit2Signature.t.sol:Permit2SignatureTest   (3 passed)
 Ran 4 tests for test/Permit2Allowance.t.sol:Permit2AllowanceTest   (4 passed)
 Ran 4 tests for test/EIP7702Attack.t.sol:EIP7702AttackTest         (4 passed)
-Ran 2 tests for test/Guard7702Sentinel.t.sol:Guard7702SentinelTest (2 passed)
-Suite result: ok. 13 passed; 0 failed; 0 skipped
+Ran 3 tests for test/Guard7702Sentinel.t.sol:Guard7702SentinelTest (3 passed)
+Suite result: ok. 14 passed; 0 failed; 0 skipped
 ```
 
 ### Step 2: Run TypeScript Reachability Engine Kill Tests
-Run the 3 automated kill tests. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (with Prague hardfork for EIP-7702; requires `anvil` in `$PATH`), executes the multi-step reachability discovery, generates the recovery transaction, and proves on-fork that exploit replay reverts:
+Run all 3 automated kill tests with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay reverts:
 
 ```bash
 cd engine
+npm install
+npm test
+```
 
-# 1. Permit2 AllowanceTransfer Kill Test
-npx tsx src/killTest.ts
-
-# 2. Permit2 SignatureTransfer Kill Test
-npx tsx src/killTestSignature.ts
-
-# 3. EIP-7702 Prague Hardfork Kill Test
-npx tsx src/killTest7702.ts
+Individual test targets:
+```bash
+npm run kill:allowance  # Permit2 AllowanceTransfer Kill Test
+npm run kill:signature  # Permit2 SignatureTransfer Kill Test
+npm run kill:7702       # EIP-7702 Prague Hardfork Kill Test
 ```
 
 ### Step 3: Run Interactive Proof Visualizer Dashboard
-Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-fork recovery execution (runs self-contained with verified pre-computed fixtures for instant offline evaluation, with live local Anvil RPC integration points):
+Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-fork recovery execution:
 
 ```bash
+# Terminal 1: Launch engine API server (enables live Anvil fork execution from UI)
+cd engine
+npm run server
+
+# Terminal 2: Launch React frontend
 cd app
 npm install
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3001, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
 
 ---
 

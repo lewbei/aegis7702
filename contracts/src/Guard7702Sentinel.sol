@@ -21,13 +21,19 @@ contract Guard7702Sentinel {
     event UnorderedNoncesInvalidated(address indexed owner, uint256 indexed wordPos, uint256 mask);
     event EmergencyLockdownExecuted(address indexed owner, uint256 pairsCount);
 
+    /// @notice In delegated EIP-7702 execution, ensures only the EOA itself can invoke operations
+    modifier onlySelf() {
+        require(msg.sender == address(this), "Guard7702: only self");
+        _;
+    }
+
     /// @notice Invalidate multiple sequential nonces on Permit2
     function batchInvalidateNonces(
         address permit2,
         address[] calldata tokens,
         address[] calldata spenders,
         uint48[] calldata newNonces
-    ) external {
+    ) external onlySelf {
         require(tokens.length == spenders.length && spenders.length == newNonces.length, "Length mismatch");
         for (uint256 i = 0; i < tokens.length; i++) {
             IPermit2(permit2).invalidateNonces(tokens[i], spenders[i], newNonces[i]);
@@ -40,7 +46,7 @@ contract Guard7702Sentinel {
         address permit2,
         uint256[] calldata wordPositions,
         uint256[] calldata masks
-    ) external {
+    ) external onlySelf {
         require(wordPositions.length == masks.length, "Length mismatch");
         for (uint256 i = 0; i < wordPositions.length; i++) {
             IPermit2(permit2).invalidateUnorderedNonces(wordPositions[i], masks[i]);
@@ -52,7 +58,7 @@ contract Guard7702Sentinel {
     function emergencyLockdown(
         address permit2,
         IPermit2.TokenSpenderPair[] calldata approvals
-    ) external {
+    ) external onlySelf {
         IPermit2(permit2).lockdown(approvals);
         emit EmergencyLockdownExecuted(msg.sender, approvals.length);
     }
