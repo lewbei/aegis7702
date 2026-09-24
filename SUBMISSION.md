@@ -101,7 +101,7 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 
 ## Empirical Grounding: Aegis7702-USENIX-Eval
 
-To ground Aegis7702 in real-world threat intelligence rather than synthetic toy scenarios, we executed a preregistered empirical evaluation against real smart contract bytecodes derived from **Huang et al. (USENIX Security 2026)** (*Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem*).
+To ground Aegis7702 in real-world threat intelligence rather than hand-crafted toy scenarios, we executed a preregistered empirical evaluation against real smart contract bytecodes derived from **Huang et al. (USENIX Security 2026)** (*Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem*).
 
 ### Inclusion Rule & Methodology
 From the published USENIX artifact, the EOA-targeted detection pipeline contains **793 chain-address detection records** (718 unique contract addresses) across seven production blockchains. Intersecting the EOA final detections with confirmed sensitive function signatures (`AM_Detect_SensitiveSigName.jsonl`) yields **58 chain-address cases (53 unique real delegate contracts)** exhibiting dangerous drain primitives (`sweep(address[])`, `sweepTokens(address)`, `sweepERC20(address)`, `drainToken(address,uint256)`, etc.).
