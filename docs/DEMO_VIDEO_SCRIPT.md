@@ -28,19 +28,19 @@
 
 ### [0:50 – 1:30] Aegis7702: Bounded Capability Reachability
 * **Visual:** Transition to the Aegis7702 Web Dashboard. The user pastes the signed capability payload and clicks **Analyze Reachability**.
-* **Action:** The live Anvil Prague EVM fork executes bounded reachability exploration ($k \le 3$). A bright red warning appears:
+* **Action:** The ephemeral Anvil Prague EVM instance executes bounded reachability exploration ($k \le 3$). A bright red warning appears:
   `🚨 CRITICAL EXPLOIT REACHABLE (10,000 USDC LOSS IN 2 STEPS)`.
 * **Visual:** The interactive reachability graph renders the discovered 2-step exploit path:
   `Step 1: Permit2.permit() [or EIP-7702.relayAuthorization]` $\to$
   `Step 2: Permit2.transferFrom() [or MaliciousDelegate.sweep()]` $\to$
   `Reachable Victim Loss: 10,000 USDC`.
 * **Voiceover:**
-  > *"This is Aegis7702. Rather than guessing with an AI risk score, Aegis7702 formalizes capability semantics and executes a bounded reachability search against a live EVM state fork. Within 80 milliseconds, Aegis7702 discovers the exact downstream attacker action path: first relaying the capability, then executing the drain, proving that 10,000 USDC is fully reachable."*
+  > *"This is Aegis7702. Rather than guessing with an AI risk score, Aegis7702 formalizes capability semantics and executes a bounded reachability search against an ephemeral EVM state reconstruction. Aegis7702 discovers the exact downstream attacker action path: first relaying the capability, then executing the drain, proving that 10,000 USDC is fully reachable."*
 
 ---
 
 ### [1:30 – 1:50] Executing the Counterexample Witness
-* **Visual:** Click **Execute Exploit Witness on Fork**. The dashboard executes the attacker trace against the ephemeral Anvil node.
+* **Visual:** Click **Execute Exploit Witness on EVM**. The dashboard executes the attacker trace against the ephemeral Anvil node.
 * **Action:** The Victim USDC balance drops in real time:
   `10,000 USDC` $\longrightarrow$ `0 USDC`.
 * **Voiceover:**

@@ -13,7 +13,7 @@ This document contains precise, technically defensible answers to the five most 
 - In EIP-7702 and Permit2, authorizations are **detached capabilities**: the user signs off-chain, causing zero immediate balance delta, but creates future attacker-controlled state transitions.
 - Aegis7702's novelty lies in:
   1. **Typed Capability Extraction:** Translating raw cryptographic signatures into structured capabilities with legal action semantics ($\mathcal{A}_{\text{modeled}}$).
-  2. **Executable Counterexample Generation:** Rather than emitting a heuristic "risk score" (e.g. 85/100) or static pattern match, Aegis7702 discovers and returns the concrete multi-step transaction trace that proves loss on an EVM state fork.
+  2. **Executable Counterexample Generation:** Rather than emitting a heuristic "risk score" (e.g. 85/100) or static pattern match, Aegis7702 discovers and returns the concrete multi-step transaction trace that proves loss on an ephemeral Prague EVM state.
   3. **State-Specific Recovery Synthesis:** Dynamically generating the exact protocol-level counter-transaction (nonce advance, delegation clearance, or bitmap flip) that permanently neutralizes the capability on-chain.
 
 ---
@@ -29,7 +29,7 @@ This document contains precise, technically defensible answers to the five most 
   - **Step 3:** Optional post-exploit action (unwinding an approval or secondary transfer).
 - Bounding $k \le 3$ is designed to capture the Relay $\to$ Drain $\to$ optional Unwind patterns exercised by our supported semantics and benchmark; we do not claim completeness for all delayed-drain sequences. It keeps branch exploration lightweight while avoiding the combinatorial state explosion of arbitrary EVM call spaces ($2^{256}$ calldata combinations).
 - We maintain mathematical honesty through our **asymmetric verification contract**:
-  $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witness under fork state } s_0}$$
+  $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witness under reconstructed state } s_0}$$
   $$\boxed{\text{No path found} \not\implies \text{globally safe (proves } \neg \text{Unsafe}_{\le 3}^{\mathcal{A}_{\text{modeled}}} \text{ only)}}$$
 - When a path is found, it is indisputable proof; when no path is found, we do not claim global safety against deeper ($k > 3$) or unmodeled actions.
 
@@ -69,7 +69,7 @@ This document contains precise, technically defensible answers to the five most 
 - We did not benchmark MetaMask, Blockaid, or Tenderly directly. Our measured comparator is $B_0$, an immediate-delta / current-execution baseline evaluating:
   $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
 - Because an off-chain authorization signature (EIP-7702 authorization tuple or detached Permit2 payload) changes **zero balances on-chain at Step 0**, an immediate-delta evaluation evaluates $\Delta = \$0.00$ and reports SAFE.
-- In our empirical evaluation of the 51 confirmed vulnerable USENIX delegates, $B_0$ produced zero immediate loss for all 51 executable-loss cases, because signing itself moves no tokens on-chain.
+- In our empirical evaluation of the 51 executable-loss cases in our standardized benchmark, $B_0$ produced zero immediate loss for all 51 executable-loss cases, because signing itself moves no tokens on-chain.
 - Aegis7702's differentiator is **executable capability reachability**: exploring downstream reachable attacker transitions rather than stopping at current execution state.
 
 ---
@@ -84,5 +84,5 @@ This document contains precise, technically defensible answers to the five most 
   - **OOD Semantic Coverage:** $0 / 735$ ($0.00\%$)
   - **Abstention Rate (`UNMODELED`):** $735 / 735$ ($100.0\%$)
 - **Important Distinction:** `UNMODELED` is an explicit **abstention**, not a claim of safety or a true negative ($\text{UNMODELED} \neq \text{TRUE NEGATIVE}$). The system recognizes that it lacks the action semantics to model the contract's dispatcher (which includes obfuscated drainers like `loserSweepETH_...`, generic call forwarders like `executeCall(address,bytes)`, and multi-sigs like Safe).
-- **Defensible Boundary:** Aegis is strong at verifying known capability semantics on live EVM forks, and currently has zero zero-shot semantic coverage on the USENIX holdout. Generalizing across arbitrary bytecodes requires an automated decompiler layer (e.g. Gigahorse) to synthesize action templates from raw dispatchers, which is our documented post-hackathon roadmap.
+- **Defensible Boundary:** Aegis is strong at verifying known capability semantics on live EVM state reconstructions, and currently has zero zero-shot semantic coverage on the USENIX holdout. Generalizing across arbitrary bytecodes requires an automated decompiler layer (e.g. Gigahorse) to synthesize action templates from raw dispatchers, which is our documented post-hackathon roadmap.
 

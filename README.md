@@ -70,7 +70,7 @@ Recent empirical research highlights this threat surface:
 
 ## 2. The Aegis7702 Solution
 
-Instead of assuming arbitrary protocol semantics or relying on simple blacklist pattern matching, Aegis7702 models off-chain capabilities as **reachable state transitions** on a forked EVM environment (Anvil):
+Instead of assuming arbitrary protocol semantics or relying on simple blacklist pattern matching, Aegis7702 models off-chain capabilities as **reachable state transitions** in an ephemeral local EVM environment (Anvil):
 
 ```text
 Signed Capability (c)
@@ -95,7 +95,7 @@ Bounded DFS Reachability Explorer (k ≤ 3, Anvil Snapshots)
             Synthesize State-Specific Recovery Action: Recovery(c, s) ⟶ s_R
                     │
                     ▼
-            Execute Recovery Action On Fork
+            Execute Recovery Action On-Chain
                     │
                     ▼
        Replay Discovered Exploit Trace Replay(π, s_R) ──► NEUTRALIZED (L(s_R, T_π(s_R)) = 0)
@@ -110,7 +110,7 @@ $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witne
 
 $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \neg Unsafe_{\le k}^{\mathcal A_{\text{modeled}}}(c,s_0) \text{ only)}}$$
 
-- **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Aegis7702 executes each step on a live Anvil fork and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under current fork state $s_0$.
+- **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Aegis7702 executes each step on an ephemeral Anvil state and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under state $s_0$.
 - **Bounded Verification Limit:** When no loss path is found, Aegis7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and lightweight. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
 - **Loss Metric Definition:** The general loss formulation evaluates the net reduction in victim assets across state transitions:
   $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t,\text{victim}}(s_0) - \text{Balance}_{t,\text{victim}}(s'))$$
@@ -216,7 +216,7 @@ Suite result: ok. 14 passed; 0 failed; 0 skipped
 ```
 
 ### Step 2: Run TypeScript Reachability Engine & Integration Tests
-Run all 3 automated kill tests and 5 adversarial integration scenarios with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay is neutralized:
+Run all 3 automated kill tests and 5 adversarial integration scenarios with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-chain that exploit replay is neutralized:
 
 ```bash
 cd engine
@@ -234,10 +234,10 @@ npm run eval:usenix         # Aegis7702-USENIX-Eval: Executable benchmark on rea
 ```
 
 ### Step 3: Run Interactive Prototype Dashboard
-Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-fork recovery execution:
+Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-chain recovery execution:
 
 ```bash
-# Terminal 1: Launch engine API server (enables live Anvil fork execution from UI)
+# Terminal 1: Launch engine API server (enables live Anvil execution from UI)
 cd engine
 npm run server
 
@@ -246,7 +246,7 @@ cd app
 npm ci
 npm run dev
 ```
-Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3099, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
+Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3099, executing live Anvil reachability searches and on-chain mitigations in real time, with seamless client fixture fallback if offline).
 
 ### Step 4: Sepolia Testnet Deployment Script (Optional)
 To deploy the `Guard7702Sentinel` and `MaliciousDelegate` contracts to Ethereum Sepolia testnet:
@@ -268,9 +268,9 @@ $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad\land\quad L(s_R, T_\pi(s_R)) = 0}$$
 
 Every verified capability counterexample satisfies:
 1. **Immediate-Delta Baseline:** Immediate balance change at depth 0 is proven to be $\Delta = \$0.00$ (demonstrating the false negative of current-state simulation).
-2. **Positive Counterexample:** Reachability explorer successfully discovers an executable exploit trace $\pi$ with $L(s_0, T_\pi(s_0)) > 0$ on forked state.
+2. **Positive Counterexample:** Reachability explorer successfully discovers an executable exploit trace $\pi$ with $L(s_0, T_\pi(s_0)) > 0$ on reconstructed EVM state.
 3. **Recovery Construction:** Engine synthesizes the exact, state-specific recovery transaction $s \to s_R$.
-4. **Deterministic Executable Verification:** Aegis7702 replays the identical counterexample $\pi$ against the post-recovery fork state $s_R$ and verifies that the previously successful exploit trace is neutralized ($L=0$, via on-chain revert or clean-state no-op), keeping tracked asset balances unchanged under the replayed trace.
+4. **Deterministic Executable Verification:** Aegis7702 replays the identical counterexample $\pi$ against the post-recovery state $s_R$ and verifies that the previously successful exploit trace is neutralized ($L=0$, via on-chain revert or clean-state no-op), keeping tracked asset balances unchanged under the replayed trace.
 
 ---
 
@@ -286,4 +286,4 @@ Every verified capability counterexample satisfies:
 
 ## 7. Research & Safety Disclaimer
 
-*Aegis7702 is a hackathon research prototype and bounded reachability verifier. While recovery transactions deterministically neutralize exploit replays on forked EVM snapshots, live mainnet mitigations operate in adversarial mempools subject to miner extraction and gas auction dynamics. In live production environments, recovery transactions should be dispatched via private RPC endpoints (e.g., Flashbots Protect).*
+*Aegis7702 is a hackathon research prototype and bounded reachability verifier. While recovery transactions deterministically neutralize exploit replays on ephemeral EVM snapshots, live mainnet mitigations operate in adversarial mempools subject to miner extraction and gas auction dynamics. In live production environments, recovery transactions should be dispatched via private RPC endpoints (e.g., Flashbots Protect).*

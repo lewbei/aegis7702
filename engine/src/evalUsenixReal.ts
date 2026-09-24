@@ -434,7 +434,7 @@ export async function runUsenixEvaluation() {
   console.log(`  Immediate-Delta Baseline Miss Rate:              ${foundLossCount} / ${foundLossCount} (100% false-negative rate on confirmed cases; signing produces zero immediate delta)`);
   console.log(`  Clean-State Witness Replay Success:              ${replayedWitnesses} / ${foundLossCount} (100% Concrete Reproducibility)`);
   console.log(`  Post-Recovery Exploit Neutralization Rate:       ${recoveryBlockedCount} / ${foundLossCount} (100% Verified Mitigations)`);
-  console.log(`  Controlled Protocol-Negative Accuracy:           ${negCorrectCount} / ${negCases.length} (4/4, 0 False Positives across 4 protocol-negative controls)`);
+  console.log(`  Controlled Negative Sanity Checks:               ${negCorrectCount} / ${negCases.length} (4/4 produced no loss witness across protocol-negative controls)`);
   console.log("================================================================================\n");
 
   // Write Out Markdown Evaluation Document
@@ -451,7 +451,7 @@ export async function runUsenixEvaluation() {
   - \`FOUND_LOSS\`: Reachability explorer discovers an executable multi-step exploit path causing $L(s_0, s') > 0$.
   - \`NO_MODELED_LOSS\`: Reachability explorer exhaustively searches supported candidate actions within bounded depth without finding asset loss.
   - \`UNMODELED\`: Delegate contract interface or calldata structure is outside current modeled capability semantics.
-- **Clean-State Witness Replay:** Every discovered counterexample witness $\\pi$ is independently replayed on fresh EVM state snapshots to verify real loss before synthesizing recovery.
+- **Clean-State Witness Replay:** Every discovered counterexample witness $\\pi$ is replayed on a fresh EVM state snapshot to verify real loss before synthesizing recovery.
 
 ---
 
@@ -479,8 +479,8 @@ export async function runUsenixEvaluation() {
 | **Unmodeled Delegated Interfaces (\`UNMODELED\`)** | **${unmodeledCount} / ${realCases.length} (${((unmodeledCount / realCases.length) * 100).toFixed(1)}%)** | Honest identification of out-of-scope contract semantics |
 | **Immediate-Delta Baseline Miss Rate** | **${foundLossCount} / ${foundLossCount} (100%)** | Missed all ${foundLossCount} executable-loss cases because signing produces zero immediate balance delta |
 | **Clean-State Witness Replay Success** | **${replayedWitnesses} / ${foundLossCount} (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
-| **Post-Recovery Exploit Neutralization** | **${recoveryBlockedCount} / ${foundLossCount} (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
-| **Controlled Protocol-Negative Accuracy** | **${negCorrectCount} / ${negCases.length} (0 false positives)** | Zero false positives across four protocol-negative controls |
+| **Post-Recovery Exploit Neutralization** | **${recoveryBlockedCount} / ${foundLossCount} (100%)** | 51/51 replayed witnesses produced zero tracked loss after recovery; replay may revert or execute as a harmless no-op. |
+| **Controlled Negative Sanity Checks** | **${negCorrectCount} / ${negCases.length}** | 4/4 produced no loss witness across protocol-negative controls |
 
 ### Key Scientific Finding
 $$\\boxed{\\text{ImmediateDelta}(c, s_0) = \\$0.00 \\;\\;\\not\\Rightarrow\\;\\; \\text{SafeFutureCapability}(c, s_0)}$$

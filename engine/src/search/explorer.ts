@@ -4,7 +4,7 @@ import {
   Hex,
   Hash
 } from "viem";
-import { Action, Counterexample, Capability, Permit2AllowanceCapability, Permit2SignatureCapability, EIP7702Capability } from "../capability/types.js";
+import { Action, Counterexample, Capability } from "../capability/types.js";
 import { Permit2AllowanceSemantics } from "../semantics/permit2Allowance.js";
 import { Permit2SignatureSemantics } from "../semantics/permit2Signature.js";
 import { EIP7702Semantics } from "../semantics/eip7702.js";
@@ -22,41 +22,113 @@ export interface ActionProvider {
   ): Promise<Action[]>;
 }
 
-export class ReachabilityExplorer {
-  constructor(
-    private publicClient: PublicClient,
-    private rpcClient: AnvilRpcClient,
-    private maxDepth: number = 3,
-    private customActionProvider?: ActionProvider
-  ) {}
+export interface LossObservation {
+  lossAmount: bigint;
+  token?: `0x${string}`;
+  symbol: string;
+  amount: string;
+  formatted: string;
+  currentBalanceFormatted?: string;
+}
 
-  async explore(
+export interface LossOracle<TContext = any> {
+  snapshotInitial(
     capability: Capability,
-    attacker: `0x${string}`
-  ): Promise<Counterexample | null> {
+    publicClient: PublicClient
+  ): Promise<TContext>;
+
+  evaluate(
+    initialContext: TContext,
+    capability: Capability,
+    publicClient: PublicClient
+  ): Promise<LossObservation | null>;
+
+  formatCurrentState?(
+    initialContext: TContext,
+    capability: Capability,
+    publicClient: PublicClient
+  ): Promise<string>;
+}
+
+export interface ERC20LossContext {
+  token: `0x${string}`;
+  symbol: string;
+  decimals: number;
+  initialBalance: bigint;
+}
+
+/**
+ * Canonical ERC-20 Loss Oracle: detects whether a victim account's tracked token balance
+ * strictly decreases following an executed action path.
+ */
+export class ERC20LossOracle implements LossOracle<ERC20LossContext> {
+  async snapshotInitial(
+    capability: Capability,
+    publicClient: PublicClient
+  ): Promise<ERC20LossContext> {
     const owner = capability.owner;
     const token = this.getTokenFromCapability(capability);
 
-    const initialBalance: bigint = await this.publicClient.readContract({
+    const initialBalance: bigint = await publicClient.readContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "balanceOf",
       args: [owner]
     });
 
-    const symbol: string = await this.publicClient.readContract({
+    const symbol: string = await publicClient.readContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "symbol"
     });
 
-    const decimals: number = await this.publicClient.readContract({
+    const decimals: number = await publicClient.readContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "decimals"
     });
 
-    return this.dfs(0, [], initialBalance, capability, attacker, symbol, decimals);
+    return { token, symbol, decimals, initialBalance };
+  }
+
+  async evaluate(
+    initialContext: ERC20LossContext,
+    capability: Capability,
+    publicClient: PublicClient
+  ): Promise<LossObservation | null> {
+    const currentBalance: bigint = await publicClient.readContract({
+      address: initialContext.token,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [capability.owner]
+    });
+
+    if (currentBalance < initialContext.initialBalance) {
+      const lossAmount = initialContext.initialBalance - currentBalance;
+      return {
+        lossAmount,
+        token: initialContext.token,
+        symbol: initialContext.symbol,
+        amount: lossAmount.toString(),
+        formatted: formatUnits(lossAmount, initialContext.decimals),
+        currentBalanceFormatted: `${formatUnits(currentBalance, initialContext.decimals)} ${initialContext.symbol}`
+      };
+    }
+    return null;
+  }
+
+  async formatCurrentState(
+    initialContext: ERC20LossContext,
+    capability: Capability,
+    publicClient: PublicClient
+  ): Promise<string> {
+    const currentBalance: bigint = await publicClient.readContract({
+      address: initialContext.token,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [capability.owner]
+    });
+    return `${formatUnits(currentBalance, initialContext.decimals)} ${initialContext.symbol}`;
   }
 
   private getTokenFromCapability(capability: Capability): `0x${string}` {
@@ -72,20 +144,60 @@ export class ReachabilityExplorer {
     }
     throw new Error(`Unsupported capability kind: ${(capability as any).kind}`);
   }
+}
+
+export interface ExplorerOptions {
+  maxDepth?: number;
+  actionProvider?: ActionProvider;
+  lossOracle?: LossOracle;
+}
+
+/**
+ * Protocol-agnostic reachability verifier kernel.
+ * Searches bounded EVM state transitions using an externally injectable ActionProvider
+ * and evaluates safety invariants via an externally injectable LossOracle.
+ */
+export class ReachabilityExplorer {
+  private maxDepth: number;
+  private customActionProvider?: ActionProvider;
+  private lossOracle: LossOracle;
+
+  constructor(
+    private publicClient: PublicClient,
+    private rpcClient: AnvilRpcClient,
+    optionsOrMaxDepth: number | ExplorerOptions = 3,
+    legacyActionProvider?: ActionProvider,
+    legacyLossOracle?: LossOracle
+  ) {
+    if (typeof optionsOrMaxDepth === "number") {
+      this.maxDepth = optionsOrMaxDepth;
+      this.customActionProvider = legacyActionProvider;
+      this.lossOracle = legacyLossOracle ?? new ERC20LossOracle();
+    } else {
+      this.maxDepth = optionsOrMaxDepth.maxDepth ?? 3;
+      this.customActionProvider = optionsOrMaxDepth.actionProvider;
+      this.lossOracle = optionsOrMaxDepth.lossOracle ?? new ERC20LossOracle();
+    }
+  }
+
+  async explore(
+    capability: Capability,
+    attacker: `0x${string}`
+  ): Promise<Counterexample | null> {
+    const initialContext = await this.lossOracle.snapshotInitial(capability, this.publicClient);
+    return this.dfs(0, [], initialContext, capability, attacker);
+  }
 
   private async dfs(
     depth: number,
     trace: Action[],
-    initialBalance: bigint,
+    initialContext: any,
     capability: Capability,
-    attacker: `0x${string}`,
-    symbol: string,
-    decimals: number
+    attacker: `0x${string}`
   ): Promise<Counterexample | null> {
     if (depth >= this.maxDepth) return null;
 
     const owner = capability.owner;
-    const token = this.getTokenFromCapability(capability);
 
     // Enumerate candidate actions from semantic models or decoupled custom action provider
     let actions: Action[] = [];
@@ -125,19 +237,22 @@ export class ReachabilityExplorer {
         // 2. Execute candidate action
         await this.executeAction(action);
 
-        // 3. Inspect state after action execution
-        const currentBalance: bigint = await this.publicClient.readContract({
-          address: token,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [owner]
-        });
+        // 3. Inspect state after action execution via injected LossOracle
+        const lossObs = await this.lossOracle.evaluate(
+          initialContext,
+          capability,
+          this.publicClient
+        );
 
-        console.log(`       -> Executed [${action.id}]. Victim balance: ${formatUnits(currentBalance, decimals)} ${symbol}`);
+        if (this.lossOracle.formatCurrentState) {
+          const stateStr = await this.lossOracle.formatCurrentState(initialContext, capability, this.publicClient);
+          console.log(`       -> Executed [${action.id}]. Victim state: ${stateStr}`);
+        } else {
+          console.log(`       -> Executed [${action.id}]. Loss observed: ${lossObs ? lossObs.formatted : "none"}`);
+        }
 
-        // Check if invariant broken (loss > 0)
-        if (currentBalance < initialBalance) {
-          const lossAmount = initialBalance - currentBalance;
+        // Check if invariant broken
+        if (lossObs) {
           // Counterexample found!
           await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
 
@@ -148,10 +263,10 @@ export class ReachabilityExplorer {
             depth: depth + 1,
             trace: [...trace, action],
             loss: {
-              token,
-              symbol,
-              amount: lossAmount.toString(),
-              formatted: formatUnits(lossAmount, decimals)
+              token: lossObs.token ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`),
+              symbol: lossObs.symbol,
+              amount: lossObs.amount,
+              formatted: lossObs.formatted
             }
           };
         }
@@ -160,11 +275,9 @@ export class ReachabilityExplorer {
         const deeperResult = await this.dfs(
           depth + 1,
           [...trace, action],
-          initialBalance,
+          initialContext,
           capability,
-          attacker,
-          symbol,
-          decimals
+          attacker
         );
 
         // 5. Backtrack

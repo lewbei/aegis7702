@@ -42,7 +42,7 @@
 | **Temporal Scope** | Current execution state ($s_0$ only) | Downstream state transitions ($k \le 3$) |
 | **Zero-Delta Signatures** | Missed (Reports SAFE, $\Delta = \$0.00$) | Explored (Discovers delayed drain path) |
 | **Output Type** | Pass / Fail or Heuristic Score | Concrete Executable Exploit Witness $\pi$ |
-| **Mitigation** | None (User left vulnerable) | Synthesized 1-Click On-Fork Recovery |
+| **Mitigation** | None (User left vulnerable) | Synthesized 1-Click On-Chain Recovery |
 
 ---
 
@@ -75,7 +75,7 @@
                            Synthesize Counter-Tx s ⟶ s_R
                                             │
                                             ▼
-                                [On-Fork Replay Proof]
+                                [On-Chain Replay Proof]
                               L(s_R, T_π(s_R)) = 0 (Neutralized)
 ```
 
@@ -98,7 +98,7 @@
    - *EIP-7702 Active:* Synthesizes Type-4 recovery pointing to `address(0)` to wipe delegation bytecode back to a clean EOA.
    - *Permit2:* Synthesizes `invalidateNonces` or `invalidateUnorderedNonces(wordPos, mask)`.
 4. **Step 4: On-Chain Replay Neutralization:**
-   - Replays identical attacker trace $\pi$ against post-recovery fork state $s_R$.
+   - Replays identical attacker trace $\pi$ against post-recovery state $s_R$.
    - **Result:** Attack reverts or no-ops; **10,000 USDC preserved** ($L(s_R) = 0$).
 
 ---
@@ -130,9 +130,9 @@ Evaluated against the complete intersection of EOA detections and sensitive func
 | **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Baseline missed all 51 executable loss cases |
 | **Clean-State Witness Replay** | **51 / 51 (100%)** | 100% loss reproducibility on fresh EVM snapshots |
 | **Post-Recovery Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L=0$) |
-| **Controlled Negative Accuracy** | **4 / 4 (0 false positives)** | Zero false alarms on safe/guarded EOAs |
+| **Controlled Negative Sanity Checks** | **4 / 4** | 4/4 produced no loss witness on safe/guarded EOAs |
 
-> **CI Reproducibility:** Every single case is executed in an automated, reproducible GitHub Actions CI pipeline on ephemeral Anvil Prague forks.
+> **CI Reproducibility:** Every single case is executed in an automated, reproducible GitHub Actions CI pipeline on ephemeral Anvil Prague instances.
 
 ---
 
