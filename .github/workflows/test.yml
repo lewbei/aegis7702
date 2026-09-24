@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Engine Dependencies
         working-directory: engine
-        run: npm install
+        run: npm ci
 
       - name: Run Engine Kill Tests
         working-directory: engine
@@ -67,7 +67,7 @@ jobs:
 
       - name: Install Frontend Dependencies
         working-directory: app
-        run: npm install
+        run: npm ci
 
       - name: Build Frontend
         working-directory: app
@@ -97,7 +97,7 @@ jobs:
 
       - name: Install Engine Dependencies
         working-directory: engine
-        run: npm install
+        run: npm ci
 
       - name: Run USENIX 58-Case Executable Benchmark
         working-directory: engine

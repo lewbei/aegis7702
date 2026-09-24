@@ -9,12 +9,12 @@
 
 The inspiration for **Aegis7702** originates directly from the tectonic shift occurring in Ethereum's post-Pectra architecture. With the activation of **EIP-7702**, Externally Owned Accounts (EOAs) can now ephemerally delegate their execution logic to arbitrary smart contracts using Type-4 (`0x04`) transaction envelopes and `0xef0100` bytecode pointers. When coupled with the widespread adoption of off-chain signature protocols like Uniswap’s **Permit2** (`PermitSingle`, `PermitBatch`, `PermitTransferFrom`), the Web3 ecosystem has fundamentally decoupled **authorization signing** from **on-chain execution**.
 
-This architectural decoupling broke every mainstream transaction security model. Traditional wallet firewalls and transaction scanners evaluate safety using an immediate, single-step execution heuristic:
+This architectural decoupling fundamentally challenges conventional single-step transaction security heuristics. Immediate-delta baselines evaluate safety using an immediate balance-delta check:
 $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
 
 When an attacker tricks a victim into signing an off-chain EIP-7702 authorization tuple:
 $$c = (\text{chainId}, \text{address}, \text{nonce}, y, r, s)$$
-or a detached Permit2 signature, **zero state changes occur on-chain at Step 0**. Simulators evaluate $\Delta \text{Balance}(s_0) = \$0.00$ and emit a green, reassuring **SAFE** verdict. Hours or days later, the attacker broadcasts the authorization, installs drain bytecode on the victim's EOA, and sweeps the account clean. This is a catastrophic **false negative**.
+or a detached Permit2 signature, **zero state changes occur on-chain at Step 0**. Immediate-delta baselines evaluate $\Delta \text{Balance}(s_0) = \$0.00$ and emit a SAFE verdict. Hours or days later, the attacker broadcasts the authorization, installs drain bytecode on the victim's EOA, and sweeps the account clean. This is a critical false negative.
 
 This crisis is already empirically documented. Research presented at **USENIX Security 2026** (Huang et al.) reveals that across a seven-chain dataset, **over 63% of observed EIP-7702 authorization transactions were associated with malicious EOA-targeted attacks**, identifying 924 malicious contract accounts, **over $2.3M in realized stolen funds**, and **>$10M in exposed assets**.
 
@@ -46,9 +46,9 @@ Instead of outputting ambiguous, probabilistic "AI risk scores", Aegis7702 execu
    - *Active EIP-7702 Delegation:* Constructs an EIP-7702 Type-4 transaction with authorization pointing to `address(0)` to wipe the `0xef0100...` delegation indicator back to a clean EOA.
    - *Permit2 Allowance:* Calls canonical `Permit2.invalidateNonces()` to bump nonces past signed nonces before broadcast, or `Permit2.lockdown()` to zero active allowances.
    - *Permit2 Signature:* Calls `Permit2.invalidateUnorderedNonces(wordPos, mask)` to flip the bitmap word position, neutralizing the signature.
-5. **Deterministic On-Fork Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery fork state $s_R$ and proves on-chain that the exploit reverts:
-   $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad \land \quad \text{Replay}(\pi, s_R) \text{ reverts}}$$
-   Tracked asset balances remain completely unchanged under the replayed trace.
+5. **Deterministic On-Fork Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery fork state $s_R$ and proves on-chain that the exploit is neutralized, causing zero tracked asset loss:
+   $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad \land \quad L(s_R, T_\pi(s_R)) = 0}$$
+   In execution semantics, this condition is satisfied when the replayed exploit trace either explicitly reverts on-chain (e.g., Permit2 nonce invalidation reverting with `InvalidNonce`) or executes harmlessly with zero tracked asset loss (e.g., EIP-7702 authorization skipped due to nonce mismatch, causing delegated drain calls to revert or become harmless no-ops on a clean EOA). Tracked asset balances remain completely unchanged under the replayed trace.
 
 ---
 
@@ -83,12 +83,12 @@ We implemented a unified, robust, and reproducible three-tier architecture:
     - `Guard7702SentinelTest`: 3/3 passed (delegated batch invalidations, attacker anti-griefing revert verification).
 * **TypeScript Reachability Engine:**
   - Built on Viem and ephemeral Anvil child processes with `--hardfork prague` and portable binary configuration (`ANVIL_BIN`).
-  - Implemented depth-first reachability exploration bounded at $k \le 3$, utilizing lightweight EVM snapshots (`evm_snapshot` / `evm_revert`) to keep branch exploration under 2 seconds.
+  - Implemented depth-first reachability exploration bounded at $k \le 3$, utilizing lightweight EVM snapshots (`evm_snapshot` / `evm_revert`) to keep branch exploration lightweight and fast.
   - Authored 3 automated, self-contained **Kill Tests** (`killTest.ts`, `killTestSignature.ts`, `killTest7702.ts`) and **5 Adversarial Recovery Integration Scenarios** (`testIntegration.ts`) that execute completely offline via `npm test` with zero external RPC dependencies.
   - Built a lightweight HTTP backend server (`server.ts`) exposing `/api/analyze`, `/api/recover`, and `/api/replay` for real-time frontend execution on live ephemeral Anvil instances.
-* **Interactive Proof Visualizer Dashboard:**
+* **Interactive Prototype Dashboard:**
   - Built with React 19, Vite 8, Lucide, and Tailwind CSS.
-  - Connects directly to the live Anvil engine server, displaying the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and real on-chain recovery execution with live transaction hashes.
+  - Connects directly to the live Anvil engine server, displaying the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and real on-fork recovery execution with live transaction hashes.
 * **Sepolia Testnet Deployment Script:**
   - Authored Foundry script `contracts/script/DeploySentinel.s.sol` to deploy `Guard7702Sentinel` and `MaliciousDelegate` on any public EVM network:
     ```bash
@@ -119,7 +119,7 @@ We evaluated the **full inclusion set of all 58 chain-address cases (53 unique r
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
 | **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Missed all 51 executable-loss cases because signing produces zero immediate balance delta |
 | **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
-| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
+| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L(s_R) = 0$ via on-chain revert or clean-state no-op) |
 | **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
 
 Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (full 58-case execution matrix documented in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
@@ -157,12 +157,12 @@ Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying bou
 ## Accomplishments that we're proud of
 
 1. **Closed-Loop Verification & Recovery:**
-   We did not just build a detector that alerts users. We built a closed-loop system: **Capability Extraction $\to$ Reachability Exploration $\to$ Concrete Exploit Witness $\to$ Recovery Synthesis $\to$ Replay Verification Reversion**.
+   We did not just build a detector that alerts users. We built a closed-loop system: **Capability Extraction $\to$ Reachability Exploration $\to$ Concrete Exploit Witness $\to$ Recovery Synthesis $\to$ Replay Neutralization Verification**.
 2. **100% Offline Reproducibility with Zero Flakiness:**
-   All 14 Foundry contract tests and all 3 TypeScript Anvil kill tests run completely offline without external RPC rate-limits, third-party API keys, or flaky network calls. The entire test suite completes in seconds.
+   All 14 Foundry contract tests and all 3 TypeScript Anvil kill tests run completely offline without external RPC rate-limits, third-party API keys, or flaky network calls. The contract test suite executes in 13ms, with local engine kill tests completing in under a minute and the full 58-case benchmark reproducing in CI.
 3. **Formal Mathematical Grounding:**
    Directly addressing the USENIX Security 2026 empirical dataset and grounding the authorization architecture in the **Key Sovereignty** framework of Matthias Hauser (arXiv:2605.01210).
-4. **Production-Ready Dashboard UI:**
+4. **Interactive Prototype Dashboard:**
    A high-fidelity, interactive dashboard built in Vite with zero TypeScript compilation errors, allowing technical judges and end users to visually contrast single-step simulation against downstream reachability and trigger 1-click on-fork mitigations.
 
 ---

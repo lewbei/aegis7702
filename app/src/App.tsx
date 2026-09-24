@@ -714,7 +714,7 @@ export function App() {
                         {activeRunId && realRecoveryTx ? (
                           <>
                             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                            <span className="text-emerald-400">Mitigation Verified: Exploit Replay Reverted On-Chain!</span>
+                            <span className="text-emerald-400">Mitigation Verified: Exploit Neutralized (Zero Tracked Loss)!</span>
                             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto font-mono">
                               Live Anvil Confirmed
                             </span>
@@ -722,7 +722,7 @@ export function App() {
                         ) : (
                           <>
                             <CheckCircle2 className="w-5 h-5 text-cyan-400" />
-                            <span className="text-slate-200">Precomputed Verification: Exploit Replay Reverts (Recorded Fixture)</span>
+                            <span className="text-slate-200">Precomputed Verification: Exploit Neutralized (Zero Tracked Loss)</span>
                             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-auto font-mono">
                               Recorded Fixture
                             </span>
@@ -801,10 +801,10 @@ export function App() {
                 The verification pipeline follows an executable stopping criterion on live EVM state snapshots:
               </p>
               <div className="font-mono text-xs bg-slate-900 p-3 rounded border border-slate-800 text-cyan-300 text-center">
-                SignedCapability ⟶ Bounded DFS ⟶ Discovered Loss Witness π ⟶ Synthesized Recovery s_R ⟶ Replay(π, s_R) Reverts
+                SignedCapability ⟶ Bounded DFS ⟶ Discovered Loss Witness π ⟶ Synthesized Recovery s_R ⟶ L(s_R, T_π(s_R)) = 0
               </div>
               <p className="text-xs text-slate-400">
-                Aegis7702 replays the identical counterexample against the post-recovery fork state and verifies that the previously successful exploit trace now reverts, keeping tracked balances unchanged. Note the race condition: recovery is subject to mining order and must be mined before attacker consumption.
+                Aegis7702 replays the identical counterexample against the post-recovery fork state and verifies that the previously successful exploit trace is neutralized ($L=0$, via on-chain revert or clean-state no-op), keeping tracked balances unchanged. Note the race condition: recovery is subject to mining order and must be mined before attacker consumption.
               </p>
             </div>
           </div>

@@ -1,13 +1,52 @@
 # Aegis7702: Capability-Aware Multi-Step Reachability Verifier
 
+[![CI Verification & USENIX Benchmark](https://github.com/lewbei/aegis7702/actions/workflows/test.yml/badge.svg)](https://github.com/lewbei/aegis7702/actions)
+[![USENIX 2026 Benchmark: 51/58 Passing](https://img.shields.io/badge/USENIX%202026%20Benchmark-51%2F58%20(87.9%25)-emerald)](./testdata/AEGIS_USENIX_EVALUATION.md)
 [![Foundry Tests](https://img.shields.io/badge/Foundry-14%2F14%20Passing-emerald)](./contracts)
 [![TypeScript Engine](https://img.shields.io/badge/Engine-3%2F3%20Kill%20Tests%20Passing-cyan)](./engine)
 [![EIP-7702](https://img.shields.io/badge/EIP--7702-Prague%20Hardfork-blue)](https://eips.ethereum.org/EIPS/eip-7702)
 [![Uniswap Permit2](https://img.shields.io/badge/Uniswap-Permit2%20Allowance%20%26%20Signature-purple)](https://github.com/Uniswap/permit2)
 
-> **Aegis7702** is a typed, executable capability-reachability verifier and state-specific recovery synthesizer for Ethereum Prague EIP-7702 authorizations and Uniswap Permit2 signatures.
+> **Aegis7702** is a typed capability-reachability verifier and state-specific recovery engine for Ethereum Prague EIP-7702 authorizations and Uniswap Permit2 signatures. It turns zero-delta signing traps into executable loss proofs with verified, state-specific recovery.
 >
 > Built for the **3rd-Web-Hack Hackathon** (TechZap Club, Sept 2026).
+
+---
+
+## ⚡ Executive Summary: Grounded in Real Threat Intelligence
+
+<p align="center">
+  <img src="./thumbnail.png" alt="Aegis7702 Interactive Dashboard" width="850px" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+</p>
+
+Instead of hand-crafted toy scenarios or ambiguous heuristic scores, Aegis7702 is empirically grounded in the **USENIX Security 2026** artifact (Huang et al.):
+
+| **58** Real Cases | **51 / 58** Exploit Witnesses (87.9%) | **51 / 51** Clean-State Replay | **51 / 51** Neutralized by Recovery |
+| :---: | :---: | :---: | :---: |
+| Complete $C$ inclusion set across 6 chains | Executable EVM loss witnesses discovered | 100% concrete loss reproducibility on fresh state | 100% mitigated ($L=0$) via on-chain recovery |
+
+> 🔗 **Verifiable CI Logs:** The full 58-case benchmark executes end-to-end against live Prague EVM instances directly in GitHub Actions CI. See [Latest Benchmark CI Run (Run #35964170153)](https://github.com/lewbei/aegis7702/actions/runs/35964170153) and the full 58-case execution matrix in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md).
+
+---
+
+## 🚀 Judge Quickstart (Under 2 Minutes)
+
+You do **not** need to wait for the 30-minute full 58-case benchmark to verify Aegis7702. Run our fast, self-contained end-to-end verification pipeline:
+
+```bash
+# Clone and enter repo
+git clone https://github.com/lewbei/aegis7702.git
+cd aegis7702
+
+# 1. Run Foundry contract security suite (14 tests in 13ms)
+make test-contracts   # or: cd contracts && forge test -v
+
+# 2. Run TypeScript reachability kill tests & adversarial recovery scenarios (< 1 min)
+make test-engine      # or: cd engine && npm test
+
+# 3. Launch the Interactive Prototype Dashboard
+make demo             # Launches engine API (:3099) & Vite UI (:5173)
+```
 
 ---
 
@@ -59,8 +98,8 @@ Bounded DFS Reachability Explorer (k ≤ 3, Anvil Snapshots)
             Execute Recovery Action On Fork
                     │
                     ▼
-       Replay Discovered Exploit Trace Replay(π, s_R) ──► REVERTS ON-CHAIN
-       (Tracked asset balances unchanged under replayed trace)
+       Replay Discovered Exploit Trace Replay(π, s_R) ──► NEUTRALIZED (L(s_R, T_π(s_R)) = 0)
+       (Exploit reverts or no-ops; tracked asset balances unchanged)
 ```
 
 ### Formal Verification Asymmetry
@@ -72,10 +111,10 @@ $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witne
 $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \neg Unsafe_{\le k}^{\mathcal A_{\text{modeled}}}(c,s_0) \text{ only)}}$$
 
 - **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Aegis7702 executes each step on a live Anvil fork and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under current fork state $s_0$.
-- **Bounded Verification Limit:** When no loss path is found, Aegis7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and under ~2 seconds. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
+- **Bounded Verification Limit:** When no loss path is found, Aegis7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and lightweight. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
 - **Loss Metric Definition:** The general loss formulation evaluates the net reduction in victim assets across state transitions:
   $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t,\text{victim}}(s_0) - \text{Balance}_{t,\text{victim}}(s'))$$
-  In the current MVP implementation, Aegis7702 specifically tracks and measures the primary capability-associated ERC-20 token (e.g., USDC) to establish concrete counterexample witnesses with minimal overhead, with multi-asset ETH/ERC-20 aggregate blast radius tracking designated for subsequent production expansion.
+  In the current prototype implementation, Aegis7702 specifically tracks and measures the primary capability-associated ERC-20 token (e.g., USDC) to establish concrete counterexample witnesses with minimal overhead, with multi-asset ETH/ERC-20 aggregate blast radius tracking designated for subsequent production expansion.
 - **Action Space Bounds ($\mathcal{A}_{\text{modeled}}$):**
   - *In Scope / Modeled:* Canonical Permit2 `permit` and `permitTransferFrom` invocations, EIP-7702 Type-0x04 delegation relays, and direct token drain / delegation `sweep` calls.
   - *Out of Scope / Future Work:* Arbitrary external DeFi composability (flash-loan-assisted liquidations, multi-hop DEX arbitrage, nested protocol reentrancy).
@@ -104,6 +143,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 
 ```
 .
+├── Makefile                    # Root automation: test, test-contracts, test-engine, demo
 ├── contracts/                  # Solidity smart contracts & Foundry test suites
 │   ├── src/
 │   │   ├── MockUSDC.sol        # Solmate ERC20 test token fixture
@@ -138,7 +178,8 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 │   │   ├── server.ts           # Lightweight HTTP API server bridging engine to web app
 │   │   ├── killTest.ts         # Permit2 AllowanceTransfer end-to-end kill test (100% PASS)
 │   │   ├── killTestSignature.ts# Permit2 SignatureTransfer end-to-end kill test (100% PASS)
-│   │   └── killTest7702.ts     # EIP-7702 Prague Hardfork end-to-end kill test (100% PASS)
+│   │   ├── killTest7702.ts     # EIP-7702 Prague Hardfork end-to-end kill test (100% PASS)
+│   │   └── evalUsenixReal.ts   # 58-case USENIX 2026 real artifact evaluation runner
 │   └── package.json
 │
 └── app/                        # Interactive Next/Vite React Proof Visualizer Dashboard
@@ -153,7 +194,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 ## 4. Quickstart & Verification Reproduction
 
 ### Prerequisites
-- Node.js >= 18 (`node -v`)
+- Node.js >= 20 (`node -v`, tested on Node 20 & 22)
 - Foundry / Anvil >= 1.8 (`forge --version`, `anvil --version`)
 - *Offline Execution:* All test suites and benchmarks execute completely offline against local Anvil state without requiring external RPC keys or mainnet connectivity.
 
@@ -175,11 +216,11 @@ Suite result: ok. 14 passed; 0 failed; 0 skipped
 ```
 
 ### Step 2: Run TypeScript Reachability Engine & Integration Tests
-Run all 3 automated kill tests and 5 adversarial integration scenarios with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay reverts:
+Run all 3 automated kill tests and 5 adversarial integration scenarios with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay is neutralized:
 
 ```bash
 cd engine
-npm install
+npm ci
 npm test
 ```
 
@@ -192,7 +233,7 @@ npm run test:integration   # 5 Adversarial Recovery Scenarios (Future nonces, cl
 npm run eval:usenix         # Aegis7702-USENIX-Eval: Executable benchmark on real USENIX '26 bytecodes
 ```
 
-### Step 3: Run Interactive Proof Visualizer Dashboard
+### Step 3: Run Interactive Prototype Dashboard
 Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-fork recovery execution:
 
 ```bash
@@ -202,12 +243,12 @@ npm run server
 
 # Terminal 2: Launch React frontend
 cd app
-npm install
+npm ci
 npm run dev
 ```
-Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3001/3099, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
+Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3099, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
 
-### Step 4: Sepolia Testnet Deployment (Optional)
+### Step 4: Sepolia Testnet Deployment Script (Optional)
 To deploy the `Guard7702Sentinel` and `MaliciousDelegate` contracts to Ethereum Sepolia testnet:
 ```bash
 cd contracts
@@ -223,13 +264,13 @@ A complete second-by-second presentation script with on-screen visual cues and v
 
 Aegis7702 enforces a deterministic executable stopping criterion against live EVM state snapshots:
 
-$$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad\land\quad Replay(\pi, s_R) \text{ fails}}$$
+$$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad\land\quad L(s_R, T_\pi(s_R)) = 0}$$
 
 Every verified capability counterexample satisfies:
 1. **Immediate-Delta Baseline:** Immediate balance change at depth 0 is proven to be $\Delta = \$0.00$ (demonstrating the false negative of current-state simulation).
 2. **Positive Counterexample:** Reachability explorer successfully discovers an executable exploit trace $\pi$ with $L(s_0, T_\pi(s_0)) > 0$ on forked state.
 3. **Recovery Construction:** Engine synthesizes the exact, state-specific recovery transaction $s \to s_R$.
-4. **Deterministic Executable Verification:** Aegis7702 replays the identical counterexample $\pi$ against the post-recovery fork state $s_R$ and verifies that the previously successful exploit trace now reverts, keeping tracked asset balances unchanged under the replayed trace.
+4. **Deterministic Executable Verification:** Aegis7702 replays the identical counterexample $\pi$ against the post-recovery fork state $s_R$ and verifies that the previously successful exploit trace is neutralized ($L=0$, via on-chain revert or clean-state no-op), keeping tracked asset balances unchanged under the replayed trace.
 
 ---
 
