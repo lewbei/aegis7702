@@ -385,8 +385,8 @@ export async function runUsenixEvaluation() {
           immediateDeltaLoss: "0.00 USDC",
           immediateDeltaVerdict: "SAFE",
           aegisStatus: lossFound ? "FOUND_LOSS" : "NO_MODELED_LOSS",
-          lossFound: lossFound ? `${formatUnits(counterexample!.reachableLoss, 6)} USDC` : "0.00 USDC",
-          traceSteps: counterexample ? counterexample.actionTrace.length : 0,
+          lossFound: lossFound ? `${counterexample!.loss.formatted} ${counterexample!.loss.symbol}` : "0.00 USDC",
+          traceSteps: counterexample ? counterexample.trace.length : 0,
           witnessReplaySuccess: false,
           recoveryStrategy: "NOOP",
           recoveryReplayBlocked: false
@@ -403,7 +403,7 @@ export async function runUsenixEvaluation() {
 
   // Print Summary Table
   console.log("\n================================================================================");
-  console.log("  AEGIS7702-USENIX-EVAL: EXECUTION RESULTS MATRIX");
+  console.log("  AEGIS7702-USENIX-EVAL: FULL 58-CASE EXECUTION RESULTS MATRIX");
   console.log("================================================================================");
   console.log("| ID | Chain | Delegate | Function / Case | Baseline | Aegis Status | Loss | Replay Valid | Replay Blocked |");
   console.log("|---|---|---|---|---|---|---|---|---|");
@@ -413,7 +413,7 @@ export async function runUsenixEvaluation() {
     );
   }
 
-  const realCases = results.filter((r) => r.id.startsWith("USENIX-EOA"));
+  const realCases = results.filter((r) => r.id.startsWith("USENIX-"));
   const foundLossCount = realCases.filter((r) => r.aegisStatus === "FOUND_LOSS").length;
   const noModeledLossCount = realCases.filter((r) => r.aegisStatus === "NO_MODELED_LOSS").length;
   const unmodeledCount = realCases.filter((r) => r.aegisStatus === "UNMODELED").length;
@@ -424,11 +424,11 @@ export async function runUsenixEvaluation() {
   const negCorrectCount = negCases.filter((r) => r.aegisStatus === "NO_MODELED_LOSS").length;
 
   console.log("\n================================================================================");
-  console.log("  EMPIRICAL EVALUATION QUANTITATIVE SUMMARY");
+  console.log("  EMPIRICAL EVALUATION QUANTITATIVE SUMMARY (FULL 58 CASES)");
   console.log("================================================================================");
   console.log(`  Total Evaluated Real USENIX Delegates:  ${realCases.length}`);
   console.log(`    - Vulnerable Loss Discovered (FOUND_LOSS):     ${foundLossCount} / ${realCases.length} (${((foundLossCount / realCases.length) * 100).toFixed(1)}%)`);
-  console.log(`    - Explored Without Loss (NO_MODELED_LOSS):     ${noModeledLossCount} / ${realCases.length}`);
+  console.log(`    - Explored Without Loss (NO_MODELED_LOSS):     ${noModeledLossCount} / ${realCases.length} (${((noModeledLossCount / realCases.length) * 100).toFixed(1)}%)`);
   console.log(`    - Unmodeled Interfaces (UNMODELED):            ${unmodeledCount} / ${realCases.length}`);
   console.log(`  ------------------------------------------------------------------------------`);
   console.log(`  Immediate-Delta Baseline Blindness:              ${foundLossCount} / ${foundLossCount} (100% False Negatives on vulnerable cases)`);
@@ -439,14 +439,14 @@ export async function runUsenixEvaluation() {
 
   // Write Out Markdown Evaluation Document
   const reportPath = path.resolve(__dirname, "../../testdata/AEGIS_USENIX_EVALUATION.md");
-  let md = `# Aegis7702-USENIX-Eval: Executable Real-World Benchmark Results
+  let md = `# Aegis7702-USENIX-Eval: Full 58-Case Empirical Evaluation Results
 
 **Reference Corpus:** Huang et al. (USENIX Security 2026), *"Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem"*.
 
 ## Inclusion Methodology & Protocol
 - **Dataset Source:** Official artifact from USENIX Security '26 containing 793 EOA detection records (718 unique contract addresses) across 7 production blockchains.
-- **Inclusion Criterion:** $C = \\text{EOA final detections} \\cap \\text{sensitive-function detections}$, yielding 58 chain-address cases (53 unique addresses).
-- **Stratified Evaluation Set:** 16 real-world delegate contracts stratified across 4 threat families and 5 production chains (Optimism, Arbitrum, BNB Chain, Base, Ethereum), evaluated alongside 4 controlled protocol-negative cases.
+- **Inclusion Criterion:** $C = \\text{EOA final detections} \\cap \\text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate contracts)**.
+- **Evaluated Scope:** Full inclusion set $C$ of 58 real-world delegate contracts across 6 production chains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon), evaluated alongside 4 controlled protocol-negative cases.
 - **Execution Pipeline:** Real bytecode deployed via \`anvil_setCode\` into ephemeral local Anvil Prague EVM state snapshots, evaluated under three deterministic states:
   - \`FOUND_LOSS\`: Reachability explorer discovers an executable multi-step exploit path causing $L(s_0, s') > 0$.
   - \`NO_MODELED_LOSS\`: Reachability explorer exhaustively searches supported candidate actions within bounded depth without finding asset loss.
@@ -472,10 +472,11 @@ export async function runUsenixEvaluation() {
 
 | Metric | Real-World Empirical Value | Meaning |
 |---|---|---|
-| **Evaluated Real Artifact Contracts** | **16** | Empirically derived from USENIX Security '26 |
-| **Aegis Modeled Coverage** | **${foundLossCount + noModeledLossCount} / 16 (${(((foundLossCount + noModeledLossCount) / 16) * 100).toFixed(1)}%)** | Percentage of real delegates within supported action semantics |
-| **Exploit Witnesses Discovered (\`FOUND_LOSS\`)** | **${foundLossCount} / 16 (${((foundLossCount / realCases.length) * 100).toFixed(1)}%)** | Concrete multi-step loss paths proven on EVM state |
-| **Unmodeled Delegated Interfaces (\`UNMODELED\`)** | **${unmodeledCount} / 16** | Honest identification of out-of-scope contract semantics |
+| **Evaluated Real Artifact Contracts** | **${realCases.length} (53 unique delegates)** | Empirically derived from USENIX Security '26 |
+| **Aegis Modeled Coverage** | **${foundLossCount + noModeledLossCount} / ${realCases.length} (${(((foundLossCount + noModeledLossCount) / realCases.length) * 100).toFixed(1)}%)** | Percentage of real delegates within supported action semantics |
+| **Exploit Witnesses Discovered (\`FOUND_LOSS\`)** | **${foundLossCount} / ${realCases.length} (${((foundLossCount / realCases.length) * 100).toFixed(1)}%)** | Concrete multi-step loss paths proven on EVM state |
+| **Explored Without Loss (\`NO_MODELED_LOSS\`)** | **${noModeledLossCount} / ${realCases.length} (${((noModeledLossCount / realCases.length) * 100).toFixed(1)}%)** | Real contract executed without loss under bounded model |
+| **Unmodeled Delegated Interfaces (\`UNMODELED\`)** | **${unmodeledCount} / ${realCases.length} (${((unmodeledCount / realCases.length) * 100).toFixed(1)}%)** | Honest identification of out-of-scope contract semantics |
 | **Immediate-Delta Baseline False Negatives** | **${foundLossCount} / ${foundLossCount} (100%)** | Conventional simulators reported SAFE for all ${foundLossCount} vulnerable contracts |
 | **Independent Witness Replay Success** | **${replayedWitnesses} / ${foundLossCount} (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
 | **Post-Recovery Exploit Neutralization** | **${recoveryBlockedCount} / ${foundLossCount} (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |

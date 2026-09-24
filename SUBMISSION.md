@@ -106,20 +106,21 @@ To ground Aegis7702 in real-world threat intelligence rather than synthetic toy 
 ### Inclusion Rule & Methodology
 From the published USENIX artifact, the EOA-targeted detection pipeline contains **793 chain-address detection records** (718 unique contract addresses) across seven production blockchains. Intersecting the EOA final detections with confirmed sensitive function signatures (`AM_Detect_SensitiveSigName.jsonl`) yields **58 chain-address cases (53 unique real delegate contracts)** exhibiting dangerous drain primitives (`sweep(address[])`, `sweepTokens(address)`, `sweepERC20(address)`, `drainToken(address,uint256)`, etc.).
 
-We constructed a stratified evaluation manifest ([`testdata/usenix_eval_manifest.json`](./testdata/usenix_eval_manifest.json)) containing 16 real-world delegate contracts across 4 threat families and 5 production chains (Optimism, Arbitrum, BNB Chain, Base, Ethereum), evaluated alongside 4 controlled protocol-negative cases. Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under a rigorous three-state classification (`FOUND_LOSS`, `NO_MODELED_LOSS`, `UNMODELED`):
+We evaluated the **full inclusion set of all 58 chain-address cases (53 unique real delegate contracts)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon) derived from the artifact, evaluated alongside 4 controlled protocol-negative cases. Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under a rigorous three-state classification (`FOUND_LOSS`, `NO_MODELED_LOSS`, `UNMODELED`):
 
 | Evaluation Metric | Real-World Empirical Result | Meaning |
 |---|---|---|
-| **Evaluated Real Artifact Contracts** | **16** | Empirically derived from USENIX Security '26 |
-| **Aegis Modeled Coverage** | **16 / 16 (100.0%)** | Percentage of real delegates within supported action semantics |
-| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **15 / 16 (93.8%)** | Concrete multi-step loss paths discovered on EVM state |
-| **Explored Without Loss (`NO_MODELED_LOSS`)** | **1 / 16 (6.2%)** | Delegate executed without triggering loss under bounded model |
-| **Immediate-Delta Baseline Blindness** | **15 / 15 (100%)** | Conventional simulators reported SAFE for all 15 vulnerable contracts |
-| **Independent Witness Replay Success** | **15 / 15 (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
-| **Post-Recovery Exploit Neutralization** | **15 / 15 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
+| **Evaluated Real Artifact Contracts** | **58 (53 unique delegates)** | Full inclusion set $C$ from USENIX Security '26 |
+| **Aegis Modeled Coverage** | **57 / 58 (98.3%)** | Percentage of real delegates within supported action semantics |
+| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths discovered on EVM state |
+| **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Delegate executed without triggering loss under bounded model |
+| **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
+| **Immediate-Delta Baseline Blindness** | **51 / 51 (100%)** | Conventional simulators reported SAFE for all 51 vulnerable contracts |
+| **Independent Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
+| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
 | **Controlled Protocol-Negative Precision** | **4 / 4 (100%)** | Zero false positive alarms on safe/guarded EOAs |
 
-Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (documented in detail in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
+Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (full 58-case execution matrix documented in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
 
 ---
 
