@@ -69,5 +69,20 @@ This document contains precise, technically defensible answers to the five most 
 - We did not benchmark MetaMask, Blockaid, or Tenderly directly. Our measured comparator is $B_0$, an immediate-delta / current-execution baseline evaluating:
   $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
 - Because an off-chain authorization signature (EIP-7702 authorization tuple or detached Permit2 payload) changes **zero balances on-chain at Step 0**, an immediate-delta evaluation evaluates $\Delta = \$0.00$ and reports SAFE.
-- In our empirical evaluation of the 51 confirmed vulnerable USENIX delegates, the immediate-delta baseline had a **100% false-negative rate (51/51)** on executable-loss cases, because signing itself moves no tokens on-chain.
+- In our empirical evaluation of the 51 confirmed vulnerable USENIX delegates, $B_0$ produced zero immediate loss for all 51 executable-loss cases, because signing itself moves no tokens on-chain.
 - Aegis7702's differentiator is **executable capability reachability**: exploring downstream reachable attacker transitions rather than stopping at current execution state.
+
+---
+
+### Q6: How does Aegis generalize to out-of-distribution or arbitrary bytecode outside the 58 cases?
+
+> **Short Answer:** Aegis verifies **explicitly modeled capability semantics**; it does not infer new action semantics from arbitrary bytecode. On the 735 holdout contracts from the USENIX EOA corpus, it cleanly abstains (`UNMODELED`).
+
+#### Detailed Defense:
+- **Scope of the In-Distribution Benchmark:** The 58-case benchmark evaluates contracts where delegate bytecode exposes modeled capability action semantics (e.g., canonical `sweep` and `drain` interfaces).
+- **Out-of-Distribution Semantic-Coverage Test:** When evaluated against the remaining 735 holdout chain-address cases (520 unique runtime-bytecode hashes) from the USENIX EOA candidate dataset with `hackathon-final-v1.0.0` frozen:
+  - **OOD Semantic Coverage:** $0 / 735$ ($0.00\%$)
+  - **Abstention Rate (`UNMODELED`):** $735 / 735$ ($100.0\%$)
+- **Important Distinction:** `UNMODELED` is an explicit **abstention**, not a claim of safety or a true negative ($\text{UNMODELED} \neq \text{TRUE NEGATIVE}$). The system recognizes that it lacks the action semantics to model the contract's dispatcher (which includes obfuscated drainers like `loserSweepETH_...`, generic call forwarders like `executeCall(address,bytes)`, and multi-sigs like Safe).
+- **Defensible Boundary:** Aegis is strong at verifying known capability semantics on live EVM forks, and currently has zero zero-shot semantic coverage on the USENIX holdout. Generalizing across arbitrary bytecodes requires an automated decompiler layer (e.g. Gigahorse) to synthesize action templates from raw dispatchers, which is our documented post-hackathon roadmap.
+
