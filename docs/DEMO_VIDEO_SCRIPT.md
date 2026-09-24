@@ -70,9 +70,9 @@
 ---
 
 ### [2:40 – 3:00] Real-World Grounding & Architecture
-* **Visual:** Show the USENIX Security 2026 empirical benchmark table and terminal execution (`npm run benchmark:usenix` and `forge test`).
+* **Visual:** Show the Aegis7702-USENIX-Eval empirical benchmark table and terminal execution (`npm run eval:usenix` and `forge test`).
 * **Voiceover:**
-  > *"This isn't synthetic. Grounded in research from USENIX Security 2026 analyzing 924 real-world malicious contracts, our benchmark proves a 100% detection rate where conventional baselines suffered 100% false negatives. Backed by 14 Foundry contract tests and live Prague EVM integration, Aegis7702 turns zero-delta signing traps into mathematically proven, self-healing accounts. Thank you."*
+  > *"This isn't synthetic. Grounded in research from USENIX Security 2026, we evaluated real-world contract bytecodes across five blockchains. Our verifier successfully discovered exploit paths in 93.8% of cases and neutralized 100% of replayed attacks, where conventional baselines suffered 100% false negatives. Backed by 14 Foundry contract tests and live Prague EVM integration, Aegis7702 turns zero-delta signing traps into mathematically proven, self-healing accounts. Thank you."*
 
 ---
 
@@ -83,5 +83,5 @@
 - [ ] **Pacing:** Strict adherence to the 3:00 time limit (judges stop listening past 3 minutes).
 - [ ] **Tab Setup:**
   - Tab 1: Aegis7702 Web Dashboard (`http://localhost:5173`) connected to engine (`http://localhost:3099`).
-  - Tab 2: Terminal showing `npm test` and `npm run benchmark:usenix` passing 100%.
+  - Tab 2: Terminal showing `npm test` and `npm run eval:usenix` passing.
   - Tab 3: GitHub repository (`https://github.com/lewbei/aegis7702`).

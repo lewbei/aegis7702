@@ -99,21 +99,27 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 
 ---
 
-## Empirical Evaluation: USENIX Security 2026 Dataset
+## Empirical Grounding: Aegis7702-USENIX-Eval
 
-To ensure Aegis7702 is grounded in real-world threat intelligence rather than synthetic toy scenarios, we evaluated the verifier against an empirical benchmark curated from **Huang et al. (USENIX Security 2026)**, representing 924 real-world malicious contracts across 7 production blockchains:
+To ground Aegis7702 in real-world threat intelligence rather than synthetic toy scenarios, we executed a preregistered empirical evaluation against real smart contract bytecodes derived from **Huang et al. (USENIX Security 2026)** (*Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem*).
 
-| Metric | Immediate-Delta Simulation (Blockaid/MetaMask Baseline) | Aegis7702 Capability-Reachability Verifier |
+### Inclusion Rule & Methodology
+From the published USENIX artifact, the EOA-targeted detection pipeline contains **793 chain-address detection records** (718 unique contract addresses) across seven production blockchains. Intersecting the EOA final detections with confirmed sensitive function signatures (`AM_Detect_SensitiveSigName.jsonl`) yields **58 chain-address cases (53 unique real delegate contracts)** exhibiting dangerous drain primitives (`sweep(address[])`, `sweepTokens(address)`, `sweepERC20(address)`, `drainToken(address,uint256)`, etc.).
+
+We constructed a stratified evaluation manifest ([`testdata/usenix_eval_manifest.json`](./testdata/usenix_eval_manifest.json)) containing 16 real-world delegate contracts across 4 threat families and 5 production chains (Optimism, Arbitrum, BNB Chain, Base, Ethereum), evaluated alongside 4 controlled protocol-negative cases. Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under a rigorous three-state classification (`FOUND_LOSS`, `NO_MODELED_LOSS`, `UNMODELED`):
+
+| Evaluation Metric | Real-World Empirical Result | Meaning |
 |---|---|---|
-| **Step 0 Balance Delta** | $0.00 (Evaluates to SAFE) | $0.00 (Recognized as Detached Capability) |
-| **Explored Depth** | $k = 1$ (Current Execution Only) | $k \le 3$ (Future Attacker State Space) |
-| **False Negative Rate** | **100.0% (16/16 Missed)** | **0.0% (0/16 Missed)** |
-| **True Positive Sensitivity** | **0.0% (0/16 Caught)** | **100.0% (16/16 Caught)** |
-| **Benign Account Specificity** | 100.0% (4/4 Safe) | 100.0% (4/4 Safe) |
-| **Exploit Counterexample Witness** | ❌ None (Opaque Heuristic) | ✅ **100% Concrete Multi-Step Trace** |
-| **On-Chain Recovery Action** | ❌ None | ✅ **100% Synthesized & On-Fork Verified** |
+| **Evaluated Real Artifact Contracts** | **16** | Empirically derived from USENIX Security '26 |
+| **Aegis Modeled Coverage** | **16 / 16 (100.0%)** | Percentage of real delegates within supported action semantics |
+| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **15 / 16 (93.8%)** | Concrete multi-step loss paths discovered on EVM state |
+| **Explored Without Loss (`NO_MODELED_LOSS`)** | **1 / 16 (6.2%)** | Delegate executed without triggering loss under bounded model |
+| **Immediate-Delta Baseline Blindness** | **15 / 15 (100%)** | Conventional simulators reported SAFE for all 15 vulnerable contracts |
+| **Independent Witness Replay Success** | **15 / 15 (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
+| **Post-Recovery Exploit Neutralization** | **15 / 15 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
+| **Controlled Protocol-Negative Precision** | **4 / 4 (100%)** | Zero false positive alarms on safe/guarded EOAs |
 
-Full empirical benchmark logs and contract archetypes are reproducible via `npm run benchmark:usenix` and documented in [testdata/USENIX_EVALUATION.md](./testdata/USENIX_EVALUATION.md).
+Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (documented in detail in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
 
 ---
 

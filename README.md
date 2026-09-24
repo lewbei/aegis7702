@@ -189,7 +189,7 @@ npm run kill:allowance     # Permit2 AllowanceTransfer Kill Test
 npm run kill:signature     # Permit2 SignatureTransfer Kill Test
 npm run kill:7702          # EIP-7702 Prague Hardfork Kill Test
 npm run test:integration   # 5 Adversarial Recovery Scenarios (Future nonces, clear delegation, max delta)
-npm run benchmark:usenix   # USENIX Security 2026 Empirical 20-Delegate Benchmark
+npm run eval:usenix         # Aegis7702-USENIX-Eval: Executable benchmark on real USENIX '26 bytecodes
 ```
 
 ### Step 3: Run Interactive Proof Visualizer Dashboard
