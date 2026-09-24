@@ -103,7 +103,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 ## 3. Architecture & Repository Structure
 
 ```
-guard7702/
+.
 ├── contracts/                  # Solidity smart contracts & Foundry test suites
 │   ├── src/
 │   │   ├── MockUSDC.sol        # Solmate ERC20 test token fixture
@@ -156,7 +156,7 @@ guard7702/
 Verify all 13 smart contract security tests covering baseline delta, multi-step exploit execution, and mitigation:
 
 ```bash
-cd guard7702/contracts
+cd contracts
 forge test -v
 ```
 
@@ -173,7 +173,7 @@ Suite result: ok. 13 passed; 0 failed; 0 skipped
 Run the 3 automated kill tests. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (with Prague hardfork for EIP-7702; requires `anvil` in `$PATH`), executes the multi-step reachability discovery, generates the recovery transaction, and proves on-fork that exploit replay reverts:
 
 ```bash
-cd guard7702/engine
+cd engine
 
 # 1. Permit2 AllowanceTransfer Kill Test
 npx tsx src/killTest.ts
@@ -189,7 +189,7 @@ npx tsx src/killTest7702.ts
 Launch the interactive web UI to inspect signed capabilities, view the immediate-delta baseline comparison, explore the reachability graph, and trigger on-fork recovery execution (runs self-contained with verified pre-computed fixtures for instant offline evaluation, with live local Anvil RPC integration points):
 
 ```bash
-cd guard7702/app
+cd app
 npm install
 npm run dev
 ```
