@@ -29,16 +29,37 @@ export class Permit2RecoveryPlanner {
 
     // Case A: Pending/unconsumed permit (current or future signed nonce)
     if (capability.details.nonce >= currentNonce) {
-      const newNonce = capability.details.nonce + 1;
+      const targetNonce = capability.details.nonce + 1;
+      const MAX_DELTA = 65535; // type(uint16).max limit in Permit2 AllowanceTransfer.sol
+      const delta = targetNonce - currentNonce;
+
+      if (delta > MAX_DELTA) {
+        // Permit2 reverts with ExcessiveInvalidation() if delta > type(uint16).max
+        const safeNextNonce = currentNonce + MAX_DELTA;
+        const calldata = encodeFunctionData({
+          abi: PERMIT2_ABI,
+          functionName: "invalidateNonces",
+          args: [token, spender, safeNextNonce]
+        });
+
+        return {
+          strategy: "INVALIDATE_NONCE",
+          description: `Target nonce (${targetNonce}) exceeds Permit2 max single-step delta (65,535). Chunked invalidation required: advancing to ${safeNextNonce} (step 1 of ${Math.ceil(delta / MAX_DELTA)} chunked invalidations to prevent ExcessiveInvalidation revert)`,
+          target: permit2,
+          calldata,
+          actor: owner
+        };
+      }
+
       const calldata = encodeFunctionData({
         abi: PERMIT2_ABI,
         functionName: "invalidateNonces",
-        args: [token, spender, newNonce]
+        args: [token, spender, targetNonce]
       });
 
       return {
         strategy: "INVALIDATE_NONCE",
-        description: `Owner calls invalidateNonces(token, spender, ${newNonce}) advancing nonce past signed nonce (${capability.details.nonce}) to prevent permit consumption`,
+        description: `Owner calls invalidateNonces(token, spender, ${targetNonce}) advancing nonce past signed nonce (${capability.details.nonce}) to prevent permit consumption`,
         target: permit2,
         calldata,
         actor: owner

@@ -367,7 +367,7 @@ export function App() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-white">GUARD7702</h1>
+                <h1 className="text-xl font-bold tracking-tight text-white">AEGIS7702</h1>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                   Prague & Permit2 Ready
                 </span>
@@ -555,7 +555,7 @@ export function App() {
                     ) : (
                       <>
                         <Zap className="w-4 h-4" />
-                        Run Guard7702 Verifier
+                        Run Aegis7702 Verifier
                       </>
                     )}
                   </button>
@@ -566,6 +566,18 @@ export function App() {
             {/* Reachability Verification Results */}
             {verificationDone && (
               <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 space-y-6 shadow-2xl shadow-cyan-950/40 animate-in fade-in duration-300">
+                {(!activeRunId || engineStatus === 'fallback') && (
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span className="font-semibold flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      PRECOMPUTED VERIFIED FIXTURE (No live Anvil execution performed in this run)
+                    </span>
+                    <span className="text-[11px] text-amber-400/80 font-mono">
+                      Run 'npm run server' in /engine to enable live on-chain execution
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                   <div>
                     <div className="flex items-center gap-2">
@@ -647,7 +659,7 @@ export function App() {
                     <div>
                       <div className="text-xs uppercase tracking-wider text-cyan-400 font-semibold flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5" />
-                        Guard7702 State-Specific Recovery Synthesizer
+                        Aegis7702 State-Specific Recovery Synthesizer
                       </div>
                       <div className="font-semibold text-white text-sm mt-0.5">
                         Strategy: {scenario.recovery.strategy}
@@ -657,17 +669,21 @@ export function App() {
                     <button
                       onClick={handleExecuteRecovery}
                       disabled={isRecovering}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs shadow-lg transition-all disabled:opacity-50 ${
+                        activeRunId
+                          ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20"
+                          : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                      }`}
                     >
                       {isRecovering ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          Executing On-Fork Mitigation...
+                          {activeRunId ? "Executing On-Fork Mitigation..." : "Loading Precomputed Trace..."}
                         </>
                       ) : (
                         <>
                           <ShieldCheck className="w-4 h-4" />
-                          Execute Recovery & Verify Replay
+                          {activeRunId ? "Execute Recovery & Verify Replay" : "View Precomputed Mitigation Trace"}
                         </>
                       )}
                     </button>
@@ -689,20 +705,38 @@ export function App() {
                   </div>
 
                   {recoveryDone && (
-                    <div className="mt-4 p-4 bg-emerald-950/30 border border-emerald-500/40 rounded-xl space-y-2 animate-in fade-in duration-300">
-                      <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                        <span>Mitigation Verified: Exploit Replay Reverted On-Chain!</span>
-                        {realRecoveryTx && (
-                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto">
-                            Live Anvil Confirmed
-                          </span>
+                    <div className={`mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 ${
+                      activeRunId && realRecoveryTx
+                        ? "bg-emerald-950/30 border border-emerald-500/40"
+                        : "bg-slate-950/60 border border-slate-700/60"
+                    }`}>
+                      <div className="flex items-center gap-2 font-semibold text-sm">
+                        {activeRunId && realRecoveryTx ? (
+                          <>
+                            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                            <span className="text-emerald-400">Mitigation Verified: Exploit Replay Reverted On-Chain!</span>
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto font-mono">
+                              Live Anvil Confirmed
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+                            <span className="text-slate-200">Precomputed Verification: Exploit Replay Reverts (Recorded Fixture)</span>
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-auto font-mono">
+                              Recorded Fixture
+                            </span>
+                          </>
                         )}
                       </div>
                       <div className="text-xs text-slate-300 font-mono space-y-1">
-                        {realRecoveryTx && (
+                        {realRecoveryTx ? (
                           <div className="text-cyan-300 truncate">
                             Recovery Tx Hash: <span className="font-bold">{realRecoveryTx.txHash}</span> (Gas Used: {realRecoveryTx.gasUsed})
+                          </div>
+                        ) : (
+                          <div className="text-slate-400 italic">
+                            Recorded recovery transaction calldata verified against local Anvil fork
                           </div>
                         )}
                         <div>
@@ -730,7 +764,7 @@ export function App() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Cpu className="w-5 h-5 text-cyan-400" />
-              Guard7702 Mathematical Architecture & Formal Semantics
+              Aegis7702 Mathematical Architecture & Formal Semantics
             </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-300 leading-relaxed">
@@ -750,7 +784,7 @@ export function App() {
               <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <h3 className="font-semibold text-cyan-400 text-sm">2. Bounded Reachability Engine (k ≤ 3) & Verification Asymmetry</h3>
                 <p>
-                  Guard7702 explores legal candidate transitions within supported action semantics 𝒜_modeled(c, s):
+                  Aegis7702 explores legal candidate transitions within supported action semantics 𝒜_modeled(c, s):
                 </p>
                 <div className="font-mono bg-slate-900 p-2 rounded border border-slate-800 text-rose-300">
                   Found loss path ⟹ Concrete vulnerability witness π, L(s₀, T_π(s₀)) &gt; 0
@@ -770,7 +804,7 @@ export function App() {
                 SignedCapability ⟶ Bounded DFS ⟶ Discovered Loss Witness π ⟶ Synthesized Recovery s_R ⟶ Replay(π, s_R) Reverts
               </div>
               <p className="text-xs text-slate-400">
-                Guard7702 replays the identical counterexample against the post-recovery fork state and verifies that the previously successful exploit trace now reverts, keeping tracked balances unchanged. Note the race condition: recovery is subject to mining order and must be mined before attacker consumption.
+                Aegis7702 replays the identical counterexample against the post-recovery fork state and verifies that the previously successful exploit trace now reverts, keeping tracked balances unchanged. Note the race condition: recovery is subject to mining order and must be mined before attacker consumption.
               </p>
             </div>
           </div>
@@ -820,7 +854,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-900/60 py-4 px-6 text-center text-xs text-slate-500">
-        Guard7702 • Built for 3rd-Web-Hack Hackathon (TechZap Club) • Tested with Foundry, Anvil (Prague Hardfork), Viem & Solmate
+        Aegis7702 • Built for 3rd-Web-Hack Hackathon (TechZap Club) • Tested with Foundry, Anvil (Prague Hardfork), Viem & Solmate
       </footer>
     </div>
   );

@@ -45,7 +45,7 @@ async function startAnvil(): Promise<ChildProcess> {
 
 async function runKillTest() {
   console.log("==================================================================");
-  console.log("       GUARD7702: PERMIT2 ALLOWANCETRANSFER KILL TEST             ");
+  console.log("       AEGIS7702: PERMIT2 ALLOWANCETRANSFER KILL TEST             ");
   console.log("==================================================================");
 
   console.log("\n[1/7] Booting clean local Anvil node...");
@@ -216,8 +216,8 @@ async function runKillTest() {
     console.log(`  -> Victim Balance at Step 0: ${formatUnits(balanceBefore, 6)} USDC`);
     console.log(`  -> Immediate Balance Delta:  $0.00 (Passes standard 1-step simulation!)`);
 
-    // Run Guard7702 Multi-Step Reachability Engine
-    console.log("\n[5/7] Executing Guard7702 Bounded Reachability Search (k <= 3)...");
+    // Run Aegis7702 Multi-Step Reachability Engine
+    console.log("\n[5/7] Executing Aegis7702 Bounded Reachability Search (k <= 3)...");
     const explorer = new ReachabilityExplorer(publicClient, publicClient);
     const counterexample = await explorer.explore(capability, attacker);
 

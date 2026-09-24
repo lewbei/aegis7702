@@ -51,7 +51,7 @@ async function startAnvil(): Promise<ChildProcess> {
 
 async function run7702KillTest() {
   console.log("==================================================================");
-  console.log("             GUARD7702: EIP-7702 KILL TEST                       ");
+  console.log("             AEGIS7702: EIP-7702 KILL TEST                       ");
   console.log("==================================================================");
 
   console.log("\n[1/7] Booting clean local Anvil node with Prague hardfork...");
@@ -166,8 +166,8 @@ async function run7702KillTest() {
     console.log("      Immediate-delta baseline verdict: [SAFE - 0.00 USDC IMMEDIATE LOSS]");
     console.log("      ⚠️  DANGER: Flawed assumption! SimulateCurrentExecution(c, s0) != SafeFutureCapability(c, s0)");
 
-    // 5. Run Guard7702 Reachability Explorer
-    console.log("\n[5/7] Running Guard7702 Bounded Reachability Explorer (depth <= 3)...");
+    // 5. Run Aegis7702 Reachability Explorer
+    console.log("\n[5/7] Running Aegis7702 Bounded Reachability Explorer (depth <= 3)...");
     const explorer = new ReachabilityExplorer(
       publicClient,
       {
@@ -181,10 +181,10 @@ async function run7702KillTest() {
     const counterexample = await explorer.explore(capability, attacker);
 
     if (!counterexample) {
-      throw new Error("FAILED: Guard7702 should have discovered the multi-step reachability exploit!");
+      throw new Error("FAILED: Aegis7702 should have discovered the multi-step reachability exploit!");
     }
 
-    console.log("\n  🚨 COUNTEREXAMPLE DISCOVERED BY GUARD7702!");
+    console.log("\n  🚨 COUNTEREXAMPLE DISCOVERED BY AEGIS7702!");
     console.log(`     Capability Kind: ${counterexample.capability}`);
     console.log(`     Reachable Depth: ${counterexample.depth} step(s)`);
     console.log(`     Reachable Loss:  ${counterexample.loss.formatted} ${counterexample.loss.symbol}`);

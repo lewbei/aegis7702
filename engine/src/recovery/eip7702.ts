@@ -8,6 +8,7 @@ export interface EIP7702RecoveryAction {
   calldata: Hex;
   actor: Address;
   requiredAdvances?: number;
+  transactions?: Array<{ to: Address; value: bigint; data: Hex }>;
   recoveryDelegation?: {
     address: Address;
     chainId: number;
@@ -66,19 +67,26 @@ export class EIP7702RecoveryPlanner {
         target: owner,
         calldata: "0x",
         actor: owner,
-        requiredAdvances: 1
+        requiredAdvances: 1,
+        transactions: [{ to: owner, value: 0n, data: "0x" }]
       };
     }
 
     // currNonce < capNonce: Future nonce requires advancing to capNonce + 1
     const needed = Number(capNonce - currNonce + 1n);
+    const txs: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    for (let i = 0; i < needed; i++) {
+      txs.push({ to: owner, value: 0n, data: "0x" });
+    }
+
     return {
       strategy: "FUTURE_NONCE_MULTI_ADVANCE",
-      description: `Future-nonce authorization detected (current: ${currNonce}, target: ${capNonce}). Requires advancing account nonce by ${needed} to ${capNonce + 1n} to permanently neutralize`,
+      description: `Future-nonce authorization detected (current: ${currNonce}, target: ${capNonce}). Synthesized ${needed} nonce-advancing self-transaction(s) to advance account nonce to ${capNonce + 1n} to permanently neutralize`,
       target: owner,
       calldata: "0x",
       actor: owner,
-      requiredAdvances: needed
+      requiredAdvances: needed,
+      transactions: txs
     };
   }
 }

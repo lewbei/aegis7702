@@ -40,7 +40,7 @@ async function startAnvil(): Promise<ChildProcess> {
 
 async function runSignatureKillTest() {
   console.log("==================================================================");
-  console.log("       GUARD7702: PERMIT2 SIGNATURETRANSFER KILL TEST             ");
+  console.log("       AEGIS7702: PERMIT2 SIGNATURETRANSFER KILL TEST             ");
   console.log("==================================================================");
 
   console.log("\n[1/7] Booting clean local Anvil node on port " + ANVIL_PORT + "...");
@@ -173,8 +173,8 @@ async function runSignatureKillTest() {
     console.log(`  -> Victim Balance at Step 0: ${formatUnits(balanceBefore, 6)} USDC`);
     console.log(`  -> Immediate Balance Delta:  $0.00 (Passes standard 1-step simulation!)`);
 
-    // Run Guard7702 Bounded Reachability Engine
-    console.log("\n[5/7] Executing Guard7702 Bounded Reachability Search (k <= 3)...");
+    // Run Aegis7702 Bounded Reachability Engine
+    console.log("\n[5/7] Executing Aegis7702 Bounded Reachability Search (k <= 3)...");
     const explorer = new ReachabilityExplorer(publicClient, publicClient);
     const counterexample = await explorer.explore(capability, attacker);
 

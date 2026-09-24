@@ -29,9 +29,9 @@ Recent empirical research highlights this threat surface:
 
 ---
 
-## 2. The Guard7702 Solution
+## 2. The Aegis7702 Solution
 
-Instead of assuming arbitrary protocol semantics or relying on simple blacklist pattern matching, Guard7702 models off-chain capabilities as **reachable state transitions** on a forked EVM environment (Anvil):
+Instead of assuming arbitrary protocol semantics or relying on simple blacklist pattern matching, Aegis7702 models off-chain capabilities as **reachable state transitions** on a forked EVM environment (Anvil):
 
 ```text
 Signed Capability (c)
@@ -65,17 +65,17 @@ Bounded DFS Reachability Explorer (k ≤ 3, Anvil Snapshots)
 
 ### Formal Verification Asymmetry
 
-Guard7702 enforces an explicit, asymmetric verification contract:
+Aegis7702 enforces an explicit, asymmetric verification contract:
 
 $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witness under fork state } s_0}$$
 
 $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \neg Unsafe_{\le k}^{\mathcal A_{\text{modeled}}}(c,s_0) \text{ only)}}$$
 
-- **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Guard7702 executes each step on a live Anvil fork and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under current fork state $s_0$.
-- **Bounded Verification Limit:** When no loss path is found, Guard7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and under ~2 seconds. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
+- **Positive Counterexample:** When a path $\pi = (a_1, \ldots, a_j)$ is discovered at depth $j \le 3$, Aegis7702 executes each step on a live Anvil fork and measures $L(s_0, T_\pi(s_0)) > 0$. This provides a concrete, executable counterexample witness proving the capability is unsafe under current fork state $s_0$.
+- **Bounded Verification Limit:** When no loss path is found, Aegis7702 proves only that no loss trace exists within the supported action generators $\mathcal A_{\text{modeled}}$ and depth bound $k \le 3$. The depth bound $k \le 3$ captures canonical multi-step exploit sequences (Step 1: capability relay/permit injection $\to$ Step 2: asset transfer/sweep $\to$ Step 3: optional vault unwind/intermediate transfer) while keeping Anvil EVM snapshot branching linear and under ~2 seconds. This avoids heuristic "risk scores" while remaining mathematically honest: it is not a proof of global safety against unmodeled actions or deeper sequences ($k > 3$).
 - **Loss Metric Definition:** The general loss formulation evaluates the net reduction in victim assets across state transitions:
   $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t,\text{victim}}(s_0) - \text{Balance}_{t,\text{victim}}(s'))$$
-  In the current MVP implementation, Guard7702 specifically tracks and measures the primary capability-associated ERC-20 token (e.g., USDC) to establish concrete counterexample witnesses with minimal overhead, with multi-asset ETH/ERC-20 aggregate blast radius tracking designated for subsequent production expansion.
+  In the current MVP implementation, Aegis7702 specifically tracks and measures the primary capability-associated ERC-20 token (e.g., USDC) to establish concrete counterexample witnesses with minimal overhead, with multi-asset ETH/ERC-20 aggregate blast radius tracking designated for subsequent production expansion.
 - **Action Space Bounds ($\mathcal{A}_{\text{modeled}}$):**
   - *In Scope / Modeled:* Canonical Permit2 `permit` and `permitTransferFrom` invocations, EIP-7702 Type-0x04 delegation relays, and direct token drain / delegation `sweep` calls.
   - *Out of Scope / Future Work:* Arbitrary external DeFi composability (flash-loan-assisted liquidations, multi-hop DEX arbitrage, nested protocol reentrancy).
@@ -209,7 +209,7 @@ Open `http://localhost:5173` in your browser. (The dashboard automatically detec
 
 ## 5. Formal Stopping Criterion
 
-Guard7702 enforces a deterministic executable stopping criterion against live EVM state snapshots:
+Aegis7702 enforces a deterministic executable stopping criterion against live EVM state snapshots:
 
 $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad\land\quad Replay(\pi, s_R) \text{ fails}}$$
 
@@ -217,7 +217,7 @@ Every verified capability counterexample satisfies:
 1. **Immediate-Delta Baseline:** Immediate balance change at depth 0 is proven to be $\Delta = \$0.00$ (demonstrating the false negative of current-state simulation).
 2. **Positive Counterexample:** Reachability explorer successfully discovers an executable exploit trace $\pi$ with $L(s_0, T_\pi(s_0)) > 0$ on forked state.
 3. **Recovery Construction:** Engine synthesizes the exact, state-specific recovery transaction $s \to s_R$.
-4. **Deterministic Executable Verification:** Guard7702 replays the identical counterexample $\pi$ against the post-recovery fork state $s_R$ and verifies that the previously successful exploit trace now reverts, keeping tracked asset balances unchanged under the replayed trace.
+4. **Deterministic Executable Verification:** Aegis7702 replays the identical counterexample $\pi$ against the post-recovery fork state $s_R$ and verifies that the previously successful exploit trace now reverts, keeping tracked asset balances unchanged under the replayed trace.
 
 ---
 
@@ -233,4 +233,4 @@ Every verified capability counterexample satisfies:
 
 ## 7. Research & Safety Disclaimer
 
-*Guard7702 is a hackathon research prototype and bounded reachability verifier. While recovery transactions deterministically neutralize exploit replays on forked EVM snapshots, live mainnet mitigations operate in adversarial mempools subject to miner extraction and gas auction dynamics. In live production environments, recovery transactions should be dispatched via private RPC endpoints (e.g., Flashbots Protect).*
+*Aegis7702 is a hackathon research prototype and bounded reachability verifier. While recovery transactions deterministically neutralize exploit replays on forked EVM snapshots, live mainnet mitigations operate in adversarial mempools subject to miner extraction and gas auction dynamics. In live production environments, recovery transactions should be dispatched via private RPC endpoints (e.g., Flashbots Protect).*
