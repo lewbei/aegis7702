@@ -25,13 +25,13 @@ Instead of hand-crafted toy scenarios or ambiguous heuristic scores, Aegis7702 i
 | :---: | :---: | :---: | :---: |
 | Complete $C$ inclusion set across 6 chains | Executable EVM loss witnesses discovered | 100% concrete loss reproducibility on fresh state | 100% mitigated ($L=0$) via on-chain recovery |
 
-> 🔗 **Verifiable CI Logs:** The full 58-case benchmark executes end-to-end against live Prague EVM instances directly in GitHub Actions CI. See [Latest Benchmark CI Run (Run #35964170153)](https://github.com/lewbei/aegis7702/actions/runs/35964170153) and the full 58-case execution matrix in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md).
+> 🔗 **Verifiable CI Logs:** The full 58-case benchmark executes end-to-end against live Prague EVM instances directly in GitHub Actions CI. See [Latest Release CI Run (Run #35972326804)](https://github.com/lewbei/aegis7702/actions/runs/35972326804) and the full 58-case execution matrix in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md).
 
 ---
 
-## 🚀 Judge Quickstart (Under 2 Minutes)
+## 🚀 Judge Quickstart
 
-You do **not** need to wait for the 30-minute full 58-case benchmark to verify Aegis7702. Run our fast, self-contained end-to-end verification pipeline:
+You do **not** need to wait for the 30-minute full 58-case benchmark to verify Aegis7702. Run our self-contained end-to-end verification pipeline:
 
 ```bash
 # Clone and enter repo
@@ -41,7 +41,7 @@ cd aegis7702
 # 1. Run Foundry contract security suite (14 tests in 13ms)
 make test-contracts   # or: cd contracts && forge test -v
 
-# 2. Run TypeScript reachability kill tests & adversarial recovery scenarios (< 1 min)
+# 2. Run TypeScript reachability kill tests & adversarial recovery scenarios (fast local execution)
 make test-engine      # or: cd engine && npm test
 
 # 3. Launch the Interactive Prototype Dashboard

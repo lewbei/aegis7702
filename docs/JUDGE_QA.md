@@ -27,7 +27,7 @@ This document contains precise, technically defensible answers to the five most 
   - **Step 1:** Relaying the capability (Type-4 envelope or `permit()`).
   - **Step 2:** Executing the unauthorized action (calling `sweep()` or `transferFrom()`).
   - **Step 3:** Optional post-exploit action (unwinding an approval or secondary transfer).
-- Bounding $k \le 3$ is sufficient to capture 100% of canonical delayed-drain exploit sequences while preventing the combinatorial state explosion of arbitrary EVM call spaces ($2^{256}$ calldata combinations).
+- Bounding $k \le 3$ is designed to capture the Relay $\to$ Drain $\to$ optional Unwind patterns exercised by our supported semantics and benchmark; we do not claim completeness for all delayed-drain sequences. It keeps branch exploration lightweight while avoiding the combinatorial state explosion of arbitrary EVM call spaces ($2^{256}$ calldata combinations).
 - We maintain mathematical honesty through our **asymmetric verification contract**:
   $$\boxed{\text{Found loss path } \pi \implies \text{concrete vulnerability witness under fork state } s_0}$$
   $$\boxed{\text{No path found} \not\implies \text{globally safe (proves } \neg \text{Unsafe}_{\le 3}^{\mathcal{A}_{\text{modeled}}} \text{ only)}}$$
@@ -41,7 +41,7 @@ This document contains precise, technically defensible answers to the five most 
 
 #### Detailed Defense:
 - We do not claim to perform "historical mainnet replays," because many of these malicious contracts were detected across six different L1/L2 chains (Ethereum, Base, BNB, Optimism, Arbitrum, Polygon) with diverse historical block states.
-- Instead, we took the complete intersection ($C = 58$ chain-address cases / 53 unique contracts) of confirmed EOA-targeted attacks and sensitive drain functions from the artifact of Huang et al. (USENIX Security 2026).
+- Instead, we took the complete intersection ($C = 58$ chain-address cases / 53 unique delegate addresses / 47 unique runtime bytecodes) of confirmed EOA-targeted attacks and sensitive drain functions from the artifact of Huang et al. (USENIX Security 2026).
 - We loaded each contract's **exact artifact bytecode** via `anvil_setCode` into an ephemeral Prague-EVM snapshot with a victim account and measured whether the delegate could execute an unauthorized drain under valid EIP-7702 authorization.
 - The 58 bytecode hashes match the artifact files exactly and are fully checked into the repository (`testdata/usenix_bytecodes/`) and reproduced in GitHub Actions CI.
 
@@ -66,8 +66,8 @@ This document contains precise, technically defensible answers to the five most 
 > **Short Answer:** We do not claim existing tools are broken across the board; our experimental comparator is specifically the **immediate-delta / current-execution baseline ($B_0$)**. Aegis7702 addresses a structural blindspot that single-step simulation cannot solve.
 
 #### Detailed Defense:
-- Existing wallet firewalls and transaction simulation tools (including Blockaid, Tenderly, and standard wallet RPCs) evaluate transactions by simulating what happens **at the moment of signing**:
+- We did not benchmark MetaMask, Blockaid, or Tenderly directly. Our measured comparator is $B_0$, an immediate-delta / current-execution baseline evaluating:
   $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
-- Because an off-chain authorization signature (EIP-7702 authorization tuple or detached Permit2 payload) changes **zero balances on-chain at Step 0**, any immediate-delta evaluation evaluates $\Delta = \$0.00$ and reports SAFE.
-- In our empirical evaluation of the 51 confirmed vulnerable USENIX delegates, the immediate-delta baseline had a **100% false-negative rate (51/51)**, because signing moves no tokens.
-- Aegis7702 does not replace wallet security; it complements it by providing **forward-looking capability reachability search** for detached authorization primitives that cannot be evaluated with single-step simulation.
+- Because an off-chain authorization signature (EIP-7702 authorization tuple or detached Permit2 payload) changes **zero balances on-chain at Step 0**, an immediate-delta evaluation evaluates $\Delta = \$0.00$ and reports SAFE.
+- In our empirical evaluation of the 51 confirmed vulnerable USENIX delegates, the immediate-delta baseline had a **100% false-negative rate (51/51)** on executable-loss cases, because signing itself moves no tokens on-chain.
+- Aegis7702's differentiator is **executable capability reachability**: exploring downstream reachable attacker transitions rather than stopping at current execution state.

@@ -27,17 +27,17 @@
 
 ---
 
-## Slide 2: Why Existing Tools Miss the Threat
+## Slide 2: Why an Immediate-Delta Baseline Misses Detached Capabilities
 
-### Current Simulators Only Evaluate Current State ($s_0$)
+### The Fundamental Limit of Single-Step Evaluation ($s_0$)
 
-- **Single-Step Blindness:** Mainstream wallets and transaction scanners evaluate:
+- **The Comparator:** Our $B_0$ comparator evaluates only immediate balance change at signing:
   $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
-- **The Blindspot:** Since signing detached capabilities produces no state delta at depth 0, current-execution baselines emit a green **SAFE** verdict.
-- **Real-World Damage:** Research from **USENIX Security 2026** (Huang et al.) reveals that over **63% of observed EIP-7702 authorization transactions** were associated with malicious EOA-targeted attacks, exposing **>$10M in user assets**.
+- **The Blindspot:** Because detached EIP-7702 authorizations and Permit2 signatures produce zero on-chain balance delta at the point of signing ($\Delta = \$0.00$), $B_0$ inevitably evaluates the capability as safe and misses the later reachable drain.
+- **Empirical Confirmation:** In our 58-case USENIX benchmark, $B_0$ suffered a 100% false-negative rate on executable loss cases (51/51).
 - **What is Needed:** Not another static blacklist or probabilistic "AI risk score", but a **dynamic reachability search** over future attacker-controlled state transitions.
 
-| Dimension | Single-Step Simulation Baseline | Aegis7702 Reachability Engine |
+| Dimension | Single-Step Immediate-Delta ($B_0$) | Aegis7702 Reachability Engine |
 |---|---|---|
 | **Temporal Scope** | Current execution state ($s_0$ only) | Downstream state transitions ($k \le 3$) |
 | **Zero-Delta Signatures** | Missed (Reports SAFE, $\Delta = \$0.00$) | Explored (Discovers delayed drain path) |
@@ -116,14 +116,14 @@ Evaluated against the complete intersection of EOA detections and sensitive func
                                       │
                                       ▼
              Complete Inclusion Set C = 58 Chain-Address Cases
-                         (53 Unique Runtime Bytecodes)
+       (53 Unique Delegate Addresses / 47 Unique Runtime Bytecodes)
 ```
 
 ### Reproducible Results (Executed in GitHub Actions CI):
 
 | Benchmark Metric | Empirical Value | Rigorous Meaning |
 |---|:---:|---|
-| **Evaluated Real Bytecodes** | **58 cases (53 unique)** | Full inclusion set $C$ from USENIX '26 |
+| **Evaluated Real Cases** | **58 cases (53 unique addresses, 47 unique bytecodes)** | Full inclusion set $C$ from USENIX '26 |
 | **Exploit Witnesses Discovered** | **51 / 58 (87.9%)** | Concrete multi-step EVM loss witnesses proven |
 | **Explored Without Loss** | **6 / 58 (10.3%)** | Real bytecodes requiring unmodeled state/preconditions |
 | **Unmodeled Interface** | **1 / 58 (1.7%)** | Unsupported interface reported honestly |

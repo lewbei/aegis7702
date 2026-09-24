@@ -4,7 +4,7 @@
 
 ## Inclusion Methodology & Protocol
 - **Dataset Source:** Official artifact from USENIX Security '26 containing 793 EOA detection records (718 unique contract addresses) across 7 production blockchains.
-- **Inclusion Criterion:** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate contracts)**.
+- **Inclusion Criterion:** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)**.
 - **Evaluated Scope:** Full inclusion set $C$ of 58 real-world delegate contracts across 6 production chains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon), evaluated alongside 4 controlled protocol-negative cases.
 - **Execution Pipeline:** Real bytecode deployed via `anvil_setCode` into ephemeral local Anvil Prague EVM state snapshots, evaluated under three deterministic states:
   - `FOUND_LOSS`: Reachability explorer discovers an executable multi-step exploit path causing $L(s_0, s') > 0$.
@@ -87,7 +87,7 @@
 
 | Metric | Real-World Empirical Value | Meaning |
 |---|---|---|
-| **Evaluated Real Artifact Contracts** | **58 (53 unique delegates)** | Empirically derived from USENIX Security '26 |
+| **Evaluated Real Artifact Contracts** | **58 (53 unique addresses, 47 unique bytecodes)** | Empirically derived from USENIX Security '26 |
 | **Aegis Modeled Coverage** | **57 / 58 (98.3%)** | Percentage of real delegates within supported action semantics |
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths proven on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Real contract executed without loss under bounded model |

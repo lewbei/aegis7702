@@ -4,8 +4,9 @@
 **Project Name:** Aegis7702  
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
-**Release Tag:** `hackathon-final-v1.0.0`  
-**Latest Verified CI Run:** [GitHub Actions Run #35964170153](https://github.com/lewbei/aegis7702/actions/runs/35964170153)  
+**Release Tag:** [`hackathon-final-v1.0.0`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.0)  
+**Latest Verified Release CI Run:** [GitHub Actions Run #35972326804](https://github.com/lewbei/aegis7702/actions/runs/35972326804) (4/4 jobs green)  
+**Reference Benchmark CI Run:** [GitHub Actions Run #35964170153](https://github.com/lewbei/aegis7702/actions/runs/35964170153)  
 
 ---
 
@@ -15,24 +16,24 @@ The complete verification pipeline was executed end-to-end on GitHub Actions CI 
 
 | CI Job Name | Status | Duration | Scope |
 |---|:---:|:---:|---|
-| **Foundry Solidity Tests** | ✅ `success` | 29s | 14/14 security tests passing across 4 suites |
-| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 5m 51s | 3 kill tests + 5 adversarial recovery scenarios |
-| **React Frontend Build** | ✅ `success` | 12s | Clean Vite 8 + React 19 production build (`0` errors) |
-| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 29m 43s | Full Prague-EVM execution across all 58 artifact bytecodes |
+| **Foundry Solidity Tests** | ✅ `success` | 25s | 14/14 security tests passing across 4 suites |
+| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 5m 46s | 3 kill tests + 5 adversarial recovery scenarios |
+| **React Frontend Build** | ✅ `success` | 18s | Clean Vite 8 + React 19 production build (`0` errors) |
+| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 29m 49s | Full Prague-EVM execution across all 58 artifact bytecodes |
 
 ---
 
 ## 2. Empirical Benchmark Evidence Summary
 
 - **Reference Corpus:** Huang et al. (USENIX Security 2026), *"Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem"*.
-- **Inclusion Criterion ($C$):** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate contracts)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon).
+- **Inclusion Criterion ($C$):** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon).
 - **Execution Methodology:** Original runtime bytecodes extracted directly from the USENIX artifact, deployed via `anvil_setCode` into standardized Prague-EVM snapshots.
 
 ### Quantitative Results Matrix
 
 | Metric | Empirical Value | Rigorous Meaning |
 |---|:---:|---|
-| **Evaluated Real Artifact Contracts** | **58 (53 unique)** | Full inclusion set $C$ from USENIX Security '26 |
+| **Evaluated Real Artifact Contracts** | **58 (53 unique addresses, 47 unique bytecodes)** | Full inclusion set $C$ from USENIX Security '26 |
 | **Aegis Modeled Coverage** | **57 / 58 (98.3%)** | Supported capability action semantics |
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths proven on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Real contract requiring additional preconditions |
@@ -58,7 +59,7 @@ Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testda
 
 ---
 
-## 4. Judge Reproduction Instructions (Under 2 Minutes)
+## 4. Judge Reproduction Instructions (Quickstart)
 
 ```bash
 # 1. Clone repository
@@ -68,7 +69,7 @@ cd aegis7702
 # 2. Run Foundry Contract Security Suite (14 tests in 13ms)
 make test-contracts
 
-# 3. Run TypeScript Reachability Kill Tests & Adversarial Scenarios (< 1 min)
+# 3. Run TypeScript Reachability Kill Tests & Adversarial Scenarios (fast local execution)
 make test-engine
 
 # 4. Launch Interactive Prototype Dashboard
