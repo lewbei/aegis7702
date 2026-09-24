@@ -72,7 +72,7 @@
 ### [2:40 – 3:00] Real-World Grounding & Architecture
 * **Visual:** Show the Aegis7702-USENIX-Eval empirical benchmark table and terminal execution (`npm run eval:usenix` and `forge test`).
 * **Voiceover:**
-  > *"This isn't synthetic. Grounded in research from USENIX Security 2026, we evaluated 58 real-world contract delegate bytecodes across six production blockchains. Our reachability verifier discovered exploit paths in 87.9% of cases and neutralized 100% of replayed attacks, where conventional single-step simulators suffered 100% false negatives. Backed by 14 Foundry contract tests and live Prague EVM integration, Aegis7702 turns zero-delta signing traps into mathematically proven, self-healing accounts. Thank you."*
+  > *"This isn't synthetic. Grounded in research from USENIX Security 2026, we evaluated 58 real-world contract delegate bytecodes across six production blockchains. Our reachability verifier discovered exploit paths in 87.9% of cases and neutralized 100% of replayed attacks, while an immediate-delta baseline missed all 51 executable-loss cases because signing itself changes no on-chain balance. Backed by 14 Foundry contract tests and live Prague EVM integration, Aegis7702 turns zero-delta signing traps into mathematically proven, self-healing accounts. Thank you."*
 
 ---
 

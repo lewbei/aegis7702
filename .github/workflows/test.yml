@@ -72,3 +72,34 @@ jobs:
       - name: Build Frontend
         working-directory: app
         run: npm run build
+
+  benchmark:
+    name: USENIX 58-Case Executable Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry (for Anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Build Contracts for Artifacts
+        working-directory: contracts
+        run: forge build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Engine Dependencies
+        working-directory: engine
+        run: npm install
+
+      - name: Run USENIX 58-Case Executable Benchmark
+        working-directory: engine
+        run: npm run eval:usenix
+

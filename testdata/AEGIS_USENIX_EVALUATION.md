@@ -10,13 +10,13 @@
   - `FOUND_LOSS`: Reachability explorer discovers an executable multi-step exploit path causing $L(s_0, s') > 0$.
   - `NO_MODELED_LOSS`: Reachability explorer exhaustively searches supported candidate actions within bounded depth without finding asset loss.
   - `UNMODELED`: Delegate contract interface or calldata structure is outside current modeled capability semantics.
-- **Independent Witness Replay:** Every discovered counterexample witness $\pi$ is independently replayed on clean EVM state to verify real loss before synthesizing recovery.
+- **Clean-State Witness Replay:** Every discovered counterexample witness $\pi$ is independently replayed on fresh EVM state snapshots to verify real loss before synthesizing recovery.
 
 ---
 
 ## Detailed Execution Matrix
 
-| Benchmark ID | Chain | Delegate Address | Function Archetype | Immediate-Delta Baseline | Aegis7702 Verifier | Reachable Loss | Witness Replay Valid? | Replay Blocked by Recovery? |
+| Benchmark ID | Chain | Delegate Address | Function Archetype | Immediate-Delta Baseline | Aegis7702 Verifier | Reachable Loss | Clean-State Replay Valid? | Replay Blocked by Recovery? |
 |---|---|---|---|---|---|---|---|---|
 | `USENIX-FULL-001` | `optimism` | `0x2f1211e3...` | `sweep(address[])` | `SAFE` | **`FOUND_LOSS`** | 10000 USDC | ✅ YES | ✅ YES |
 | `USENIX-FULL-002` | `optimism` | `0xbe7ae1e5...` | `sweepTokens(address,uint256)` | `SAFE` | **`NO_MODELED_LOSS`** | 0.00 USDC | - | - |
@@ -92,12 +92,12 @@
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths proven on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Real contract executed without loss under bounded model |
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
-| **Immediate-Delta Baseline False Negatives** | **51 / 51 (100%)** | Conventional simulators reported SAFE for all 51 vulnerable contracts |
-| **Independent Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
+| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Missed all 51 executable-loss cases because signing produces zero immediate balance delta |
+| **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
 | **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
-| **Controlled Protocol-Negative Specificity** | **4 / 4 (100%)** | Zero false positive alarms on safe/guarded EOAs |
+| **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | Zero false positives across four protocol-negative controls |
 
 ### Key Scientific Finding
-$$\boxed{\text{SimulateCurrentExecution}(c, s_0) = \$0.00 \;\;\not\Rightarrow\;\; \text{SafeFutureCapability}(c, s_0)}$$
+$$\boxed{\text{ImmediateDelta}(c, s_0) = \$0.00 \;\;\not\Rightarrow\;\; \text{SafeFutureCapability}(c, s_0)}$$
 
-Under immediate single-step simulation, **100% of the 51 vulnerable real-world contracts evaluated as SAFE (\$0.00 loss at Step 0)**. Aegis7702 discovered the multi-step attacker action path, confirmed the loss via independent EVM replay, and synthesized protocol-level recovery transactions that neutralized 100% of the replayed attacks.
+Under immediate single-step delta evaluation, **the baseline produced zero loss for all 51 executable-loss cases (\$0.00 loss at Step 0)**. Aegis7702 discovered the multi-step attacker action path, confirmed the loss via clean-state EVM replay, and synthesized protocol-level recovery transactions that neutralized 100% of the replayed attacks.

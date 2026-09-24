@@ -106,6 +106,8 @@ To ground Aegis7702 in real-world threat intelligence rather than synthetic toy 
 ### Inclusion Rule & Methodology
 From the published USENIX artifact, the EOA-targeted detection pipeline contains **793 chain-address detection records** (718 unique contract addresses) across seven production blockchains. Intersecting the EOA final detections with confirmed sensitive function signatures (`AM_Detect_SensitiveSigName.jsonl`) yields **58 chain-address cases (53 unique real delegate contracts)** exhibiting dangerous drain primitives (`sweep(address[])`, `sweepTokens(address)`, `sweepERC20(address)`, `drainToken(address,uint256)`, etc.).
 
+Aegis7702 was evaluated against the complete 58-case intersection of EOA-targeted detections and sensitive-function detections from the published USENIX Security 2026 artifact, representing 53 unique real delegate contracts across six chains. Using the artifact's original runtime bytecode in a standardized Prague-EVM reconstruction, Aegis7702 produced executable asset-loss witnesses for 51/58 cases (87.9%), returned NO_MODELED_LOSS for six, and explicitly marked one unsupported interface as UNMODELED. All 51 discovered witnesses reproduced asset loss on clean-state replay, and all 51 were neutralized by nonce-based recovery in the benchmark environment.
+
 We evaluated the **full inclusion set of all 58 chain-address cases (53 unique real delegate contracts)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon) derived from the artifact, evaluated alongside 4 controlled protocol-negative cases. Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under a rigorous three-state classification (`FOUND_LOSS`, `NO_MODELED_LOSS`, `UNMODELED`):
 
 | Evaluation Metric | Real-World Empirical Result | Meaning |
@@ -115,10 +117,10 @@ We evaluated the **full inclusion set of all 58 chain-address cases (53 unique r
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths discovered on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Delegate executed without triggering loss under bounded model |
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
-| **Immediate-Delta Baseline Blindness** | **51 / 51 (100%)** | Conventional simulators reported SAFE for all 51 vulnerable contracts |
-| **Independent Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh replay |
+| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Missed all 51 executable-loss cases because signing produces zero immediate balance delta |
+| **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
 | **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of verified exploits reverted on-chain after synthesized recovery |
-| **Controlled Protocol-Negative Precision** | **4 / 4 (100%)** | Zero false positive alarms on safe/guarded EOAs |
+| **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
 
 Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (full 58-case execution matrix documented in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
 
