@@ -2,12 +2,21 @@ import { encodeFunctionData, PublicClient, Hex, Address } from "viem";
 import { Permit2AllowanceCapability } from "../capability/types.js";
 import { PERMIT2_ABI } from "../capability/abis.js";
 
+export interface Permit2RecoveryTx {
+  to: Address;
+  data: Hex;
+  value: bigint;
+  targetNonce?: number;
+}
+
 export interface RecoveryAction {
   strategy: "INVALIDATE_NONCE" | "LOCKDOWN_ALLOWANCE" | "NOOP";
   description: string;
   target: Address;
   calldata: Hex;
   actor: Address; // Must be owner because Permit2 checks msg.sender
+  transactions?: Permit2RecoveryTx[];
+  totalChunks?: number;
 }
 
 export class Permit2RecoveryPlanner {
@@ -33,36 +42,38 @@ export class Permit2RecoveryPlanner {
       const MAX_DELTA = 65535; // type(uint16).max limit in Permit2 AllowanceTransfer.sol
       const delta = targetNonce - currentNonce;
 
-      if (delta > MAX_DELTA) {
-        // Permit2 reverts with ExcessiveInvalidation() if delta > type(uint16).max
-        const safeNextNonce = currentNonce + MAX_DELTA;
+      const txs: Permit2RecoveryTx[] = [];
+      let stepNonce = currentNonce;
+
+      while (stepNonce < targetNonce) {
+        stepNonce = Math.min(stepNonce + MAX_DELTA, targetNonce);
         const calldata = encodeFunctionData({
           abi: PERMIT2_ABI,
           functionName: "invalidateNonces",
-          args: [token, spender, safeNextNonce]
+          args: [token, spender, stepNonce]
         });
-
-        return {
-          strategy: "INVALIDATE_NONCE",
-          description: `Target nonce (${targetNonce}) exceeds Permit2 max single-step delta (65,535). Chunked invalidation required: advancing to ${safeNextNonce} (step 1 of ${Math.ceil(delta / MAX_DELTA)} chunked invalidations to prevent ExcessiveInvalidation revert)`,
-          target: permit2,
-          calldata,
-          actor: owner
-        };
+        txs.push({
+          to: permit2,
+          data: calldata,
+          value: 0n,
+          targetNonce: stepNonce
+        });
       }
 
-      const calldata = encodeFunctionData({
-        abi: PERMIT2_ABI,
-        functionName: "invalidateNonces",
-        args: [token, spender, targetNonce]
-      });
+      const totalChunks = txs.length;
+      const description =
+        totalChunks > 1
+          ? `Target nonce (${targetNonce}) exceeds Permit2 max single-step delta (65,535). Generated ${totalChunks} sequential chunked invalidation transactions to safely advance nonce to ${targetNonce} without triggering ExcessiveInvalidation revert`
+          : `Owner calls invalidateNonces(token, spender, ${targetNonce}) advancing nonce past signed nonce (${capability.details.nonce}) to prevent permit consumption`;
 
       return {
         strategy: "INVALIDATE_NONCE",
-        description: `Owner calls invalidateNonces(token, spender, ${targetNonce}) advancing nonce past signed nonce (${capability.details.nonce}) to prevent permit consumption`,
+        description,
         target: permit2,
-        calldata,
-        actor: owner
+        calldata: txs[0].data,
+        actor: owner,
+        transactions: txs,
+        totalChunks
       };
     }
 
@@ -79,7 +90,8 @@ export class Permit2RecoveryPlanner {
         description: `Owner calls lockdown([{ token, spender }]) to immediately zero out the compromised allowance`,
         target: permit2,
         calldata,
-        actor: owner
+        actor: owner,
+        transactions: [{ to: permit2, data: calldata, value: 0n }]
       };
     }
 
@@ -88,7 +100,8 @@ export class Permit2RecoveryPlanner {
       description: "No active risk or capability already neutralized",
       target: permit2,
       calldata: "0x",
-      actor: owner
+      actor: owner,
+      transactions: []
     };
   }
 }

@@ -9,6 +9,7 @@
     "kill:7702": "tsx src/killTest7702.ts",
     "test:integration": "tsx src/testIntegration.ts",
     "test": "npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration",
+    "benchmark:usenix": "tsx src/benchmarkUsenix.ts",
     "server": "tsx src/server.ts"
   },
   "keywords": [],

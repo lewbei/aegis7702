@@ -302,7 +302,7 @@ async function run7702KillTest() {
       account: victimAccount,
       contractAddress: "0x0000000000000000000000000000000000000000",
       chainId: 31337,
-      nonce: currentVictimNonce
+      nonce: currentVictimNonce + 1
     });
 
     const clearTx = await victimWallet.sendTransaction({
@@ -313,6 +313,9 @@ async function run7702KillTest() {
 
     const clearedBytecode = await publicClient.getBytecode({ address: victim });
     console.log(`      Bytecode after recovery execution:   ${clearedBytecode || "0x"}`);
+    if (clearedBytecode && clearedBytecode !== "0x") {
+      throw new Error(`Expected delegation bytecode to be cleared, but got: ${clearedBytecode}`);
+    }
 
     // Step B4: Attacker attempts to call sweep()
     const sweepData = encodeFunctionData({
@@ -321,16 +324,15 @@ async function run7702KillTest() {
       args: [usdcAddress, attacker]
     });
 
-    await publicClient.request({
-      method: "eth_sendTransaction",
-      params: [
-        {
-          from: attacker,
-          to: victim,
-          data: sweepData
-        }
-      ]
-    } as any);
+    try {
+      const sweepTx = await attackerWallet.sendTransaction({
+        to: victim,
+        data: sweepData
+      });
+      await publicClient.waitForTransactionReceipt({ hash: sweepTx });
+    } catch {
+      // Calling non-contract EOA with sweep() calldata no-ops or reverts
+    }
 
     const victimBalFinal = await publicClient.readContract({
       address: usdcAddress,

@@ -1,6 +1,6 @@
 # Aegis7702: Capability-Aware Multi-Step Reachability Verifier
 
-[![Foundry Tests](https://img.shields.io/badge/Foundry-13%2F13%20Passing-emerald)](./contracts)
+[![Foundry Tests](https://img.shields.io/badge/Foundry-14%2F14%20Passing-emerald)](./contracts)
 [![TypeScript Engine](https://img.shields.io/badge/Engine-3%2F3%20Kill%20Tests%20Passing-cyan)](./engine)
 [![EIP-7702](https://img.shields.io/badge/EIP--7702-Prague%20Hardfork-blue)](https://eips.ethereum.org/EIPS/eip-7702)
 [![Uniswap Permit2](https://img.shields.io/badge/Uniswap-Permit2%20Allowance%20%26%20Signature-purple)](https://github.com/Uniswap/permit2)
@@ -113,7 +113,7 @@ $$\boxed{\text{No path found} \not\implies \text{globally safe (establishes } \n
 │   │   ├── Permit2Allowance.t.sol # 4/4 PASS (Multi-step drain & recovery)
 │   │   ├── Permit2Signature.t.sol # 3/3 PASS (Unordered nonce drain & recovery)
 │   │   ├── EIP7702Attack.t.sol    # 4/4 PASS (Prague Type-4 relay, nonce advance, address(0) clear)
-│   │   └── Guard7702Sentinel.t.sol # 2/2 PASS (Delegated context batch invalidations)
+│   │   └── Guard7702Sentinel.t.sol # 3/3 PASS (Delegated context batch invalidations & griefing prevention)
 │   └── foundry.toml            # Solc 0.8.17, via_ir = true, Prague EVM settings
 │
 ├── engine/                     # TypeScript Capability-Reachability Engine
@@ -174,8 +174,8 @@ Ran 3 tests for test/Guard7702Sentinel.t.sol:Guard7702SentinelTest (3 passed)
 Suite result: ok. 14 passed; 0 failed; 0 skipped
 ```
 
-### Step 2: Run TypeScript Reachability Engine Kill Tests
-Run all 3 automated kill tests with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay reverts:
+### Step 2: Run TypeScript Reachability Engine & Integration Tests
+Run all 3 automated kill tests and 5 adversarial integration scenarios with a single command. Each test script automatically spawns, orchestrates, and tears down ephemeral local Anvil child processes (supporting Prague hardfork for EIP-7702; requires `anvil` in `$PATH` or via `ANVIL_BIN`), decodes raw wallet signatures via Capability Decoders, executes multi-step reachability discovery, generates recovery transactions, and proves on-fork that exploit replay reverts:
 
 ```bash
 cd engine
@@ -183,11 +183,13 @@ npm install
 npm test
 ```
 
-Individual test targets:
+Individual test & benchmark targets:
 ```bash
-npm run kill:allowance  # Permit2 AllowanceTransfer Kill Test
-npm run kill:signature  # Permit2 SignatureTransfer Kill Test
-npm run kill:7702       # EIP-7702 Prague Hardfork Kill Test
+npm run kill:allowance     # Permit2 AllowanceTransfer Kill Test
+npm run kill:signature     # Permit2 SignatureTransfer Kill Test
+npm run kill:7702          # EIP-7702 Prague Hardfork Kill Test
+npm run test:integration   # 5 Adversarial Recovery Scenarios (Future nonces, clear delegation, max delta)
+npm run benchmark:usenix   # USENIX Security 2026 Empirical 20-Delegate Benchmark
 ```
 
 ### Step 3: Run Interactive Proof Visualizer Dashboard
@@ -203,7 +205,17 @@ cd app
 npm install
 npm run dev
 ```
-Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3001, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
+Open `http://localhost:5173` in your browser. (The dashboard automatically detects the live engine server on port 3001/3099, executing live Anvil reachability searches and on-fork mitigations in real time, with seamless client fixture fallback if offline).
+
+### Step 4: Sepolia Testnet Deployment (Optional)
+To deploy the `Guard7702Sentinel` and `MaliciousDelegate` contracts to Ethereum Sepolia testnet:
+```bash
+cd contracts
+forge script script/DeploySentinel.s.sol --rpc-url <SEPOLIA_RPC_URL> --broadcast
+```
+
+### Step 5: Official 3-Minute Presentation Walkthrough
+A complete second-by-second presentation script with on-screen visual cues and voiceover text is documented in [docs/DEMO_VIDEO_SCRIPT.md](./docs/DEMO_VIDEO_SCRIPT.md).
 
 ---
 
