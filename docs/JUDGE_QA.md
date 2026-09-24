@@ -49,7 +49,7 @@ This document contains precise, technically defensible answers to the five most 
 
 ### Q4: Why is executable witness yield 87.9% (51/58) rather than 100%?
 
-> **Short Answer:** An 87.9% executable witness yield is **proof of empirical rigor**. Aegis7702 honestly reports contracts that require unmodeled external state or unsupported interfaces rather than forcing a false verdict.
+> **Short Answer:** The 87.9% yield reflects actual EVM execution outcomes under the standardized reconstruction. Aegis7702 honestly reports contracts that require unmodeled external state or unsupported interfaces rather than forcing a false verdict.
 
 #### Detailed Defense:
 - The 87.9% yield reflects actual EVM execution under the standardized reconstruction: six modeled cases did not reach tracked loss and one interface was unsupported.

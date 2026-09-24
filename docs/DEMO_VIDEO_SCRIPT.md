@@ -52,10 +52,10 @@
 * **Visual:** The **Recommended Recovery Action** panel highlights the synthesized transaction:
   - For Permit2: `invalidateNonces(token, spender, nextNonce)`
   - For EIP-7702: `0-value self-transaction (nonce advance)` or `Type-4 authorization for address(0)` to wipe bytecode back to a clean EOA.
-* **Action:** Click **Execute 1-Click On-Chain Recovery**.
+* **Action:** Click **Execute Recovery on EVM**.
 * **Visual:** Live transaction confirms with hash `0x73cc...`. Victim nonce advances on-chain or Permit2 bitmap flips.
 * **Voiceover:**
-  > *"Now, Aegis7702 fixes it before the attacker can broadcast. It inspects live on-chain state and synthesizes the exact protocol-level counter-transaction. In Permit2, it calls invalidateNonces past the signed nonce; in EIP-7702, it increments the victim's account nonce or clears the delegation. With one click, the recovery transaction confirms on-chain."*
+  > *"Now, Aegis7702 fixes it before the attacker can broadcast. It inspects live on-chain state and synthesizes the exact protocol-level counter-transaction. In Permit2, it calls invalidateNonces past the signed nonce; in EIP-7702, it increments the victim's account nonce or clears the delegation. With one click, the recovery transaction executes on the EVM instance."*
 
 ---
 
@@ -65,7 +65,7 @@
 * **Visual:** Red execution badge: `REVERTED ON-CHAIN (receipt.status: 0x0 / reverted)`.
   Victim balance: `10,000 USDC (PRESERVED)`.
 * **Voiceover:**
-  > *"Finally, the closed-loop proof: Aegis7702 replays the identical attacker exploit trace against the post-recovery state. On-chain, the transaction reverts immediately due to nonce invalidation. The attack is permanently neutralized, and the victim's 10,000 USDC remains 100% safe."*
+  > *"Finally, the closed-loop proof: Aegis7702 replays the identical attacker exploit trace against the post-recovery state. On-chain, the transaction reverts immediately due to nonce invalidation. The same captured exploit trace produces zero tracked loss after recovery."*
 
 ---
 

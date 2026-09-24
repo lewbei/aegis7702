@@ -168,18 +168,11 @@ export async function runUsenixEvaluation() {
         const immediateDeltaLoss = "0.00 USDC";
         const immediateDeltaVerdict = "SAFE";
 
-        // Check if delegate interface is recognized / modeled
-        const bcLower = bytecode.toLowerCase();
-        const isKnownModeled =
-          bcLower.includes("b8dc491b") ||
-          bcLower.includes("89afcb44") ||
-          bcLower.includes("780469bb") ||
-          bcLower.includes("9d4323be") ||
-          bcLower.includes("e00af4a7") ||
-          bcLower.includes("f5f6d3af") ||
-          bcLower.includes("dec66036");
+        // Run Aegis Reachability Explorer (k <= 3) directly from verifier kernel
+        const explorer = new ReachabilityExplorer(publicClient, publicClient, 3);
+        const exploreResult = await explorer.explore(capability, attacker);
 
-        if (!isKnownModeled) {
+        if (exploreResult.status === "UNMODELED") {
           results.push({
             id: rec.id,
             source: rec.source,
@@ -195,15 +188,12 @@ export async function runUsenixEvaluation() {
             recoveryStrategy: "N/A",
             recoveryReplayBlocked: false
           });
-          console.log(`  [UNMODELED] ${rec.id} (${rec.chain} ${delegateAddress.slice(0, 10)}...): ${rec.artifact_function}`);
+          console.log(`  [UNMODELED] ${rec.id} (${rec.chain} ${delegateAddress.slice(0, 10)}...): ${rec.artifact_function} (${exploreResult.reason})`);
           continue;
         }
 
-        // Run Aegis Reachability Explorer (k <= 3)
-        const explorer = new ReachabilityExplorer(publicClient, publicClient, 3);
-        const counterexample = await explorer.explore(capability, attacker);
-
-        if (counterexample && BigInt(counterexample.loss.amount) > 0n) {
+        if (exploreResult.status === "FOUND_LOSS") {
+          const counterexample = exploreResult.counterexample;
           // Counterexample found: Perform Independent Replay on clean snapshot
           const replaySnap = (await publicClient.request({ method: "evm_snapshot" } as any)) as Hex;
           let witnessSuccess = false;
@@ -372,9 +362,10 @@ export async function runUsenixEvaluation() {
         };
 
         const explorer = new ReachabilityExplorer(publicClient, publicClient, 3);
-        const counterexample = await explorer.explore(capability, attacker);
+        const exploreResult = await explorer.explore(capability, attacker);
 
-        const lossFound = counterexample ? BigInt(counterexample.loss.amount) > 0n : false;
+        const lossFound = exploreResult.status === "FOUND_LOSS";
+        const counterexample = exploreResult.status === "FOUND_LOSS" ? exploreResult.counterexample : null;
 
         results.push({
           id: neg.id,

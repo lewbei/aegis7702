@@ -228,7 +228,8 @@ async function handleAnalyze(body: any): Promise<any> {
       3
     );
 
-    let counterexample = await explorer.explore(capability, attacker);
+    const exploreRes = await explorer.explore(capability, attacker);
+    let counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
     if (!counterexample) {
       // Construct prospective counterexample for future nonce capabilities
       const permitCalldata = encodeFunctionData({
@@ -410,7 +411,8 @@ async function handleAnalyze(body: any): Promise<any> {
       3
     );
 
-    const counterexample = await explorer.explore(capability, attacker);
+    const exploreRes = await explorer.explore(capability, attacker);
+    const counterexample = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
     const recoveryPlan = await Permit2SignatureRecoveryPlanner.plan(capability, publicClient);
 
     sessions.set(runId, {
@@ -548,7 +550,8 @@ async function handleAnalyze(body: any): Promise<any> {
       3
     );
 
-    let counterexample = await explorer.explore(capability, attacker);
+    const exploreRes = await explorer.explore(capability, attacker);
+    let counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
     if (!counterexample) {
       if (canonicalId === "eip7702_active_delegation") {
         const sweepCalldata = encodeFunctionData({

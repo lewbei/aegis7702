@@ -155,23 +155,58 @@ async function runDecouplingTest() {
     };
 
     // 4. Verify that Built-in EIP7702Semantics FAILS to discover loss on novel selector
-    console.log("\n[4/6] Evaluating Built-in Semantics (Should find 0 exploit paths on novel delegate)...");
+    console.log("\n[4/6] Evaluating Built-in Semantics (Should return explicit UNMODELED abstention on novel delegate)...");
     const defaultExplorer = new ReachabilityExplorer(publicClient, rpcClient, 3);
     const builtInResult = await defaultExplorer.explore(capability, attacker);
 
-    if (builtInResult !== null) {
-      throw new Error("Expected built-in semantics to return null on novel delegate, but it found a false exploit path!");
+    if (builtInResult.status !== "UNMODELED") {
+      throw new Error(`Expected built-in semantics to return UNMODELED on novel delegate, got ${builtInResult.status}`);
     }
-    console.log("  ✓ Confirmed: Built-in semantics abstains on novel selector (Zero false alarms on unmodeled interfaces).");
+    if (!builtInResult.reason || !builtInResult.reason.includes("does not expose modeled")) {
+      throw new Error(`Expected built-in UNMODELED reason to explain unmodeled delegate, got: ${builtInResult.reason}`);
+    }
+    console.log(`  ✓ Confirmed: Built-in semantics explicitly abstained with UNMODELED outcome: "${builtInResult.reason}"`);
 
     // 5. Define an independent, external plugin ActionProvider with real branching (b=3) & backtracking
     console.log("\n[5/6] Injecting PluginOnlyActionProvider (b=3 branching with reverts & no-ops) + CustomLossOracle...");
     let providerInvocationCount = 0;
-    let revertedBranchCount = 0;
-    let harmlessBranchCount = 0;
+    let revertExecutions = 0;
+    let harmlessExecutions = 0;
+    let backtrackCount = 0;
+
+    const wrappedRpcClient = {
+      request: async (args: { method: string; params?: any[] }) => {
+        if (args.method === "evm_revert") {
+          backtrackCount++;
+        }
+        try {
+          return await publicClient.request(args as any);
+        } catch (err) {
+          if (args.method === "eth_sendTransaction") {
+            revertExecutions++;
+          }
+          throw err;
+        }
+      }
+    };
+
+    const trackingPublicClient = new Proxy(publicClient, {
+      get(target, prop, receiver) {
+        if (prop === "waitForTransactionReceipt") {
+          return async (...args: any[]) => {
+            const receipt = await (target as any).waitForTransactionReceipt(...args);
+            if (receipt.status !== "success") {
+              revertExecutions++;
+            }
+            return receipt;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      }
+    });
 
     const pluginActionProvider: ActionProvider = {
-      async enumerateActions(cap: Capability, client, actor): Promise<Action[]> {
+      async enumerateActions(cap: Capability, client, actor): Promise<ActionEnumeration> {
         providerInvocationCount++;
         const eip7702Cap = cap as EIP7702Capability;
         const code = await client.getBytecode({ address: victim });
@@ -193,79 +228,85 @@ async function runDecouplingTest() {
         });
 
         // State 0: Before delegation is installed on victim EOA
-        // Provide 3 branching candidate paths:
+        // Provide 3 branching candidate paths (b=3):
         // Branch 1: Force revert (triggers kernel exception handling & snapshot revert)
         // Branch 2: Harmless probe (succeeds with 0 balance delta -> explores dead end & backtracks)
         // Branch 3: Type-4 relay authorization (installs delegation)
         if (!hasDelegation) {
-          return [
+          return {
+            status: "MODELED",
+            actions: [
+              {
+                id: "plugin.revertPreDelegation",
+                description: "Attacker attempts invalid call pre-delegation (expect revert)",
+                target: usdcAddress,
+                calldata: forcedRevertCalldata,
+                value: 0n,
+                actor
+              },
+              {
+                id: "plugin.harmlessProbePreDelegation",
+                description: "Attacker executes harmless read call pre-delegation",
+                target: usdcAddress,
+                calldata: encodeFunctionData({ abi: ERC20_ABI, functionName: "symbol" }),
+                value: 0n,
+                actor
+              },
+              {
+                id: "plugin.customRelay",
+                description: "Relayer broadcasts Type-4 transaction with authorization",
+                target: victim,
+                calldata: "0x",
+                value: 0n,
+                actor,
+                authorizationList: [
+                  eip7702Cap.authorizationObject || {
+                    address: eip7702Cap.delegateAddress,
+                    chainId: Number(eip7702Cap.chainId),
+                    nonce: Number(eip7702Cap.nonce),
+                    yParity: eip7702Cap.yParity,
+                    r: eip7702Cap.r,
+                    s: eip7702Cap.s
+                  }
+                ]
+              }
+            ]
+          };
+        }
+
+        // State 1: Once delegated, provide candidate actions (b=3):
+        // Branch 1: Forced revert on delegated code (reverts on-chain -> backtracks)
+        // Branch 2: Harmless ping on delegated code (succeeds, zero loss -> explores dead end & backtracks)
+        // Branch 3: evacuateAsset(usdcAddress, actor) -> novel unmodeled drain function!
+        return {
+          status: "MODELED",
+          actions: [
             {
-              id: "plugin.revertPreDelegation",
-              description: "Attacker attempts invalid call pre-delegation (expect revert)",
-              target: usdcAddress,
+              id: "plugin.revertPostDelegation",
+              description: "Attacker executes reverting call on delegated victim EOA",
+              target: victim,
               calldata: forcedRevertCalldata,
               value: 0n,
               actor
             },
             {
-              id: "plugin.customRelay",
-              description: "Relayer broadcasts Type-4 transaction with authorization",
+              id: "plugin.harmlessProbePostDelegation",
+              description: "Attacker calls harmless ping on delegated victim EOA",
               target: victim,
-              calldata: "0x",
+              calldata: encodeFunctionData({ abi: PLUGIN_DELEGATE_ABI, functionName: "harmlessPing" }),
               value: 0n,
-              actor,
-              authorizationList: [
-                eip7702Cap.authorizationObject || {
-                  address: eip7702Cap.delegateAddress,
-                  chainId: Number(eip7702Cap.chainId),
-                  nonce: Number(eip7702Cap.nonce),
-                  yParity: eip7702Cap.yParity,
-                  r: eip7702Cap.r,
-                  s: eip7702Cap.s
-                }
-              ]
+              actor
             },
             {
-              id: "plugin.harmlessProbePreDelegation",
-              description: "Attacker executes harmless read call pre-delegation",
-              target: usdcAddress,
-              calldata: encodeFunctionData({ abi: ERC20_ABI, functionName: "symbol" }),
+              id: "plugin.evacuateAsset",
+              description: "Attacker calls novel evacuateAsset(USDC, attacker) on delegated victim",
+              target: victim,
+              calldata: evacuateAssetCalldata,
               value: 0n,
               actor
             }
-          ];
-        }
-
-        // State 1: Once delegated, provide candidate actions (b=3):
-        // Branch 1: Forced revert on delegated code (reverts on-chain -> backtracks)
-        // Branch 2: Harmless ping on delegated code (succeeds, zero loss -> backtracks)
-        // Branch 3: evacuateAsset(usdcAddress, actor) -> novel unmodeled drain function!
-        return [
-          {
-            id: "plugin.revertPostDelegation",
-            description: "Attacker executes reverting call on delegated victim EOA",
-            target: victim,
-            calldata: forcedRevertCalldata,
-            value: 0n,
-            actor
-          },
-          {
-            id: "plugin.evacuateAsset",
-            description: "Attacker calls novel evacuateAsset(USDC, attacker) on delegated victim",
-            target: victim,
-            calldata: evacuateAssetCalldata,
-            value: 0n,
-            actor
-          },
-          {
-            id: "plugin.harmlessProbePostDelegation",
-            description: "Attacker calls harmless ping on delegated victim EOA",
-            target: victim,
-            calldata: encodeFunctionData({ abi: PLUGIN_DELEGATE_ABI, functionName: "harmlessPing" }),
-            value: 0n,
-            actor
-          }
-        ];
+          ]
+        };
       }
     };
 
@@ -301,6 +342,10 @@ async function runDecouplingTest() {
           args: [cap.owner]
         });
 
+        if (currentBal === ctx.initialBalance) {
+          harmlessExecutions++;
+        }
+
         if (currentBal < ctx.initialBalance) {
           const delta = ctx.initialBalance - currentBal;
           return {
@@ -327,16 +372,16 @@ async function runDecouplingTest() {
 
     // 6. Execute UNMODIFIED ReachabilityExplorer with novel ActionProvider + LossOracle
     console.log("\n[6/6] Executing UNMODIFIED ReachabilityExplorer with injected ActionProvider & LossOracle...");
-    const decoupledExplorer = new ReachabilityExplorer(publicClient, rpcClient, {
-      maxDepth: 3,
+    const decoupledExplorer = new ReachabilityExplorer(trackingPublicClient as any, wrappedRpcClient, {
+      maxDepth: 2,
       actionProvider: pluginActionProvider,
       lossOracle: customLossOracle
     });
 
     const counterexample = await decoupledExplorer.explore(capability, attacker);
 
-    if (!counterexample) {
-      throw new Error("Expected ReachabilityExplorer to discover loss witness using external ActionProvider, but found null!");
+    if (!counterexample || counterexample.status !== "FOUND_LOSS") {
+      throw new Error("Expected ReachabilityExplorer to discover loss witness using external ActionProvider, but found null or no loss!");
     }
 
     console.log("\n  🚨 COUNTEREXAMPLE DISCOVERED BY VERIFIER KERNEL!");
@@ -345,6 +390,9 @@ async function runDecouplingTest() {
     console.log(`    - Winning Exploit Trace: ${counterexample.trace.map(t => t.id).join(" -> ")}`);
     console.log(`    - ActionProvider Invocations: ${providerInvocationCount}`);
     console.log(`    - Invariant Oracle Evaluations: ${oracleEvaluationCount}`);
+    console.log(`    - Revert Executions Backtracked: ${revertExecutions}`);
+    console.log(`    - Harmless Dead-End Executions: ${harmlessExecutions}`);
+    console.log(`    - Backtrack Snapshot Reverts: ${backtrackCount}`);
 
     // Verify assertions
     if (counterexample.loss.formatted !== "10000") {
@@ -356,13 +404,22 @@ async function runDecouplingTest() {
     if (counterexample.trace[0].id !== "plugin.customRelay" || counterexample.trace[1].id !== "plugin.evacuateAsset") {
       throw new Error(`Unexpected action IDs in winning trace: ${counterexample.trace.map(t => t.id).join(", ")}`);
     }
+    if (revertExecutions < 2) {
+      throw new Error(`Expected at least 2 revert executions, got ${revertExecutions}`);
+    }
+    if (harmlessExecutions < 2) {
+      throw new Error(`Expected at least 2 harmless executions, got ${harmlessExecutions}`);
+    }
+    if (backtrackCount < 4) {
+      throw new Error(`Expected at least 4 backtracks, got ${backtrackCount}`);
+    }
 
     console.log("\n==================================================================");
-    console.log("  ✅ SUCCESS: PROVED NOVEL SEMANTICS + SEARCH BRANCHING (b=3)    ");
+    console.log("  ✅ SUCCESS: PROVED NOVEL SEMANTICS + DEAD-END SEARCH TRAVERSAL  ");
     console.log("  1. Novel delegate selector 'evacuateAsset' discovered          ");
-    console.log("  2. Built-in semantics abstained (0 false positives)            ");
+    console.log("  2. Built-in semantics abstained with explicit UNMODELED         ");
     console.log("  3. DFS kernel explored multi-branch tree & backtracked reverts ");
-    console.log("  4. LossOracle independently evaluated invariant violations    ");
+    console.log("  4. InvariantOracle independently evaluated invariant violations");
     console.log("==================================================================");
 
   } finally {

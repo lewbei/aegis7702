@@ -4,7 +4,7 @@ import {
   Hex,
   Hash
 } from "viem";
-import { Action, Counterexample, Capability } from "../capability/types.js";
+import { Action, Counterexample, Capability, CapabilityKind } from "../capability/types.js";
 import { Permit2AllowanceSemantics } from "../semantics/permit2Allowance.js";
 import { Permit2SignatureSemantics } from "../semantics/permit2Signature.js";
 import { EIP7702Semantics } from "../semantics/eip7702.js";
@@ -14,15 +14,25 @@ export interface AnvilRpcClient {
   request(args: { method: string; params?: any[] }): Promise<any>;
 }
 
+export type ActionEnumeration =
+  | {
+      status: "MODELED";
+      actions: Action[];
+    }
+  | {
+      status: "UNMODELED";
+      reason: string;
+    };
+
 export interface ActionProvider {
   enumerateActions(
     capability: Capability,
     publicClient: PublicClient,
     attacker: `0x${string}`
-  ): Promise<Action[]>;
+  ): Promise<ActionEnumeration>;
 }
 
-export interface LossObservation {
+export interface InvariantViolation {
   lossAmount: bigint;
   token?: `0x${string}`;
   symbol: string;
@@ -31,7 +41,9 @@ export interface LossObservation {
   currentBalanceFormatted?: string;
 }
 
-export interface LossOracle<TContext = any> {
+export type LossObservation = InvariantViolation;
+
+export interface InvariantOracle<TContext = any> {
   snapshotInitial(
     capability: Capability,
     publicClient: PublicClient
@@ -41,7 +53,7 @@ export interface LossOracle<TContext = any> {
     initialContext: TContext,
     capability: Capability,
     publicClient: PublicClient
-  ): Promise<LossObservation | null>;
+  ): Promise<InvariantViolation | null>;
 
   formatCurrentState?(
     initialContext: TContext,
@@ -49,6 +61,8 @@ export interface LossOracle<TContext = any> {
     publicClient: PublicClient
   ): Promise<string>;
 }
+
+export type LossOracle<TContext = any> = InvariantOracle<TContext>;
 
 export interface ERC20LossContext {
   token: `0x${string}`;
@@ -58,10 +72,83 @@ export interface ERC20LossContext {
 }
 
 /**
+ * Built-in Capability Action Provider: encapsulates frozen action generation
+ * for PERMIT2_ALLOWANCE, PERMIT2_SIGNATURE, and EIP-7702 canonical selector families.
+ * Formally distinguishes between modeled interfaces and explicit UNMODELED abstentions.
+ */
+export class BuiltinCapabilityActionProvider implements ActionProvider {
+  async enumerateActions(
+    capability: Capability,
+    publicClient: PublicClient,
+    attacker: `0x${string}`
+  ): Promise<ActionEnumeration> {
+    if (capability.kind === "PERMIT2_ALLOWANCE") {
+      const actions = await Permit2AllowanceSemantics.enumerateActions(capability, publicClient, attacker);
+      return { status: "MODELED", actions };
+    }
+
+    if (capability.kind === "PERMIT2_SIGNATURE") {
+      const actions = await Permit2SignatureSemantics.enumerateActions(capability, publicClient, attacker);
+      return { status: "MODELED", actions };
+    }
+
+    if (capability.kind === "EIP7702") {
+      const owner = capability.owner;
+      const currentBytecode = await publicClient.getBytecode({ address: owner });
+      const hasDelegation =
+        currentBytecode &&
+        currentBytecode.length >= 48 &&
+        currentBytecode.toLowerCase().startsWith("0xef0100");
+
+      const delegateAddress = hasDelegation
+        ? (("0x" + currentBytecode.slice(8, 48)) as `0x${string}`)
+        : capability.delegateAddress;
+
+      if (delegateAddress && delegateAddress !== "0x0000000000000000000000000000000000000000") {
+        const delegateCode = ((await publicClient.getBytecode({ address: delegateAddress })) || "").toLowerCase();
+        if (delegateCode && delegateCode.length > 2) {
+          // Check if delegate bytecode exposes ANY modeled interface
+          const isModeled =
+            delegateCode.includes("b8dc491b") || // sweep(address,address)
+            delegateCode.includes("89afcb44") ||
+            delegateCode.includes("780469bb") || // sweep(address[])
+            delegateCode.includes("0408544c") || // sweepTokens(address)
+            delegateCode.includes("9d4323be") ||
+            delegateCode.includes("e00af4a7") ||
+            delegateCode.includes("f5f6d3af") ||
+            delegateCode.includes("dec66036") ||
+            delegateCode.includes("48d17cfd") || // drainToken(address,uint256)
+            delegateCode.includes("45cf19a8") ||
+            delegateCode.includes("2ae985de") ||
+            delegateCode.includes("fc1e0178") || // sweepERC20(address)
+            delegateCode.includes("1cff79cd") || // execute(address,uint256,bytes)
+            delegateCode.includes("b61d27f6");   // executeCall(address,bytes)
+
+          if (!isModeled) {
+            return {
+              status: "UNMODELED",
+              reason: `Delegate ${delegateAddress} does not expose modeled EIP-7702 action selectors`
+            };
+          }
+        }
+      }
+
+      const actions = await EIP7702Semantics.enumerateActions(capability, publicClient, attacker);
+      return { status: "MODELED", actions };
+    }
+
+    return {
+      status: "UNMODELED",
+      reason: `Unsupported capability kind: ${(capability as any).kind}`
+    };
+  }
+}
+
+/**
  * Canonical ERC-20 Loss Oracle: detects whether a victim account's tracked token balance
  * strictly decreases following an executed action path.
  */
-export class ERC20LossOracle implements LossOracle<ERC20LossContext> {
+export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
   async snapshotInitial(
     capability: Capability,
     publicClient: PublicClient
@@ -95,7 +182,7 @@ export class ERC20LossOracle implements LossOracle<ERC20LossContext> {
     initialContext: ERC20LossContext,
     capability: Capability,
     publicClient: PublicClient
-  ): Promise<LossObservation | null> {
+  ): Promise<InvariantViolation | null> {
     const currentBalance: bigint = await publicClient.readContract({
       address: initialContext.token,
       abi: ERC20_ABI,
@@ -149,43 +236,101 @@ export class ERC20LossOracle implements LossOracle<ERC20LossContext> {
 export interface ExplorerOptions {
   maxDepth?: number;
   actionProvider?: ActionProvider;
-  lossOracle?: LossOracle;
+  lossOracle?: InvariantOracle;
+  invariantOracle?: InvariantOracle;
 }
+
+export type ExploreResult =
+  | {
+      status: "FOUND_LOSS";
+      counterexample: Counterexample;
+      visitedStates: number;
+      capability: CapabilityKind;
+      owner: `0x${string}`;
+      attacker: `0x${string}`;
+      depth: number;
+      trace: Action[];
+      loss: {
+        token: `0x${string}`;
+        symbol: string;
+        amount: string;
+        formatted: string;
+      };
+    }
+  | {
+      status: "NO_MODELED_LOSS";
+      visitedStates: number;
+    }
+  | {
+      status: "UNMODELED";
+      reason: string;
+      visitedStates: number;
+    };
 
 /**
  * Protocol-agnostic reachability verifier kernel.
  * Searches bounded EVM state transitions using an externally injectable ActionProvider
- * and evaluates safety invariants via an externally injectable LossOracle.
+ * and evaluates safety invariants via an externally injectable InvariantOracle.
  */
 export class ReachabilityExplorer {
   private maxDepth: number;
-  private customActionProvider?: ActionProvider;
-  private lossOracle: LossOracle;
+  private actionProvider: ActionProvider;
+  private invariantOracle: InvariantOracle;
+  private visitedStates: number = 0;
 
   constructor(
     private publicClient: PublicClient,
     private rpcClient: AnvilRpcClient,
     optionsOrMaxDepth: number | ExplorerOptions = 3,
     legacyActionProvider?: ActionProvider,
-    legacyLossOracle?: LossOracle
+    legacyLossOracle?: InvariantOracle
   ) {
     if (typeof optionsOrMaxDepth === "number") {
       this.maxDepth = optionsOrMaxDepth;
-      this.customActionProvider = legacyActionProvider;
-      this.lossOracle = legacyLossOracle ?? new ERC20LossOracle();
+      this.actionProvider = legacyActionProvider ?? new BuiltinCapabilityActionProvider();
+      this.invariantOracle = legacyLossOracle ?? new ERC20LossOracle();
     } else {
       this.maxDepth = optionsOrMaxDepth.maxDepth ?? 3;
-      this.customActionProvider = optionsOrMaxDepth.actionProvider;
-      this.lossOracle = optionsOrMaxDepth.lossOracle ?? new ERC20LossOracle();
+      this.actionProvider = optionsOrMaxDepth.actionProvider ?? new BuiltinCapabilityActionProvider();
+      this.invariantOracle = optionsOrMaxDepth.invariantOracle ?? optionsOrMaxDepth.lossOracle ?? new ERC20LossOracle();
     }
   }
 
   async explore(
     capability: Capability,
     attacker: `0x${string}`
-  ): Promise<Counterexample | null> {
-    const initialContext = await this.lossOracle.snapshotInitial(capability, this.publicClient);
-    return this.dfs(0, [], initialContext, capability, attacker);
+  ): Promise<ExploreResult> {
+    this.visitedStates = 0;
+    const initialContext = await this.invariantOracle.snapshotInitial(capability, this.publicClient);
+    const searchOutcome = await this.dfs(0, [], initialContext, capability, attacker);
+
+    if (searchOutcome.status === "FOUND_LOSS") {
+      const ce = searchOutcome.counterexample;
+      return {
+        status: "FOUND_LOSS",
+        counterexample: ce,
+        visitedStates: this.visitedStates,
+        capability: ce.capability,
+        owner: ce.owner,
+        attacker: ce.attacker,
+        depth: ce.depth,
+        trace: ce.trace,
+        loss: ce.loss
+      };
+    }
+
+    if (searchOutcome.status === "UNMODELED") {
+      return {
+        status: "UNMODELED",
+        reason: searchOutcome.reason,
+        visitedStates: this.visitedStates
+      };
+    }
+
+    return {
+      status: "NO_MODELED_LOSS",
+      visitedStates: this.visitedStates
+    };
   }
 
   private async dfs(
@@ -194,40 +339,29 @@ export class ReachabilityExplorer {
     initialContext: any,
     capability: Capability,
     attacker: `0x${string}`
-  ): Promise<Counterexample | null> {
-    if (depth >= this.maxDepth) return null;
+  ): Promise<{ status: "FOUND_LOSS"; counterexample: Counterexample } | { status: "UNMODELED"; reason: string } | { status: "NO_MODELED_LOSS" }> {
+    this.visitedStates++;
+    if (depth >= this.maxDepth) {
+      return { status: "NO_MODELED_LOSS" };
+    }
 
     const owner = capability.owner;
 
-    // Enumerate candidate actions from semantic models or decoupled custom action provider
-    let actions: Action[] = [];
-    if (this.customActionProvider) {
-      actions = await this.customActionProvider.enumerateActions(
-        capability,
-        this.publicClient,
-        attacker
-      );
-    } else if (capability.kind === "PERMIT2_ALLOWANCE") {
-      actions = await Permit2AllowanceSemantics.enumerateActions(
-        capability,
-        this.publicClient,
-        attacker
-      );
-    } else if (capability.kind === "PERMIT2_SIGNATURE") {
-      actions = await Permit2SignatureSemantics.enumerateActions(
-        capability,
-        this.publicClient,
-        attacker
-      );
-    } else if (capability.kind === "EIP7702") {
-      actions = await EIP7702Semantics.enumerateActions(
-        capability,
-        this.publicClient,
-        attacker
-      );
+    // Enumerate candidate actions from decoupled ActionProvider
+    const enumeration = await this.actionProvider.enumerateActions(
+      capability,
+      this.publicClient,
+      attacker
+    );
+
+    if (enumeration.status === "UNMODELED") {
+      return { status: "UNMODELED", reason: enumeration.reason };
     }
 
+    const actions = enumeration.actions;
     console.log(`     [Explorer Depth ${depth}] Discovered ${actions.length} legal action(s): ${actions.map(a => a.id).join(", ")}`);
+
+    let unmodeledReason: string | undefined;
 
     for (const action of actions) {
       // 1. Take snapshot for backtrack
@@ -237,36 +371,39 @@ export class ReachabilityExplorer {
         // 2. Execute candidate action
         await this.executeAction(action);
 
-        // 3. Inspect state after action execution via injected LossOracle
-        const lossObs = await this.lossOracle.evaluate(
+        // 3. Inspect state after action execution via injected InvariantOracle
+        const violation = await this.invariantOracle.evaluate(
           initialContext,
           capability,
           this.publicClient
         );
 
-        if (this.lossOracle.formatCurrentState) {
-          const stateStr = await this.lossOracle.formatCurrentState(initialContext, capability, this.publicClient);
+        if (this.invariantOracle.formatCurrentState) {
+          const stateStr = await this.invariantOracle.formatCurrentState(initialContext, capability, this.publicClient);
           console.log(`       -> Executed [${action.id}]. Victim state: ${stateStr}`);
         } else {
-          console.log(`       -> Executed [${action.id}]. Loss observed: ${lossObs ? lossObs.formatted : "none"}`);
+          console.log(`       -> Executed [${action.id}]. Invariant violation: ${violation ? violation.formatted : "none"}`);
         }
 
         // Check if invariant broken
-        if (lossObs) {
+        if (violation) {
           // Counterexample found!
           await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
 
           return {
-            capability: capability.kind,
-            owner,
-            attacker,
-            depth: depth + 1,
-            trace: [...trace, action],
-            loss: {
-              token: lossObs.token ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`),
-              symbol: lossObs.symbol,
-              amount: lossObs.amount,
-              formatted: lossObs.formatted
+            status: "FOUND_LOSS",
+            counterexample: {
+              capability: (capability as any).kind || "GENERIC_CAPABILITY",
+              owner,
+              attacker,
+              depth: depth + 1,
+              trace: [...trace, action],
+              loss: {
+                token: violation.token ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`),
+                symbol: violation.symbol,
+                amount: violation.amount,
+                formatted: violation.formatted
+              }
             }
           };
         }
@@ -283,8 +420,11 @@ export class ReachabilityExplorer {
         // 5. Backtrack
         await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
 
-        if (deeperResult) {
+        if (deeperResult.status === "FOUND_LOSS") {
           return deeperResult;
+        }
+        if (deeperResult.status === "UNMODELED") {
+          unmodeledReason = deeperResult.reason;
         }
       } catch (err: any) {
         console.log(`       -> Action [${action.id}] reverted: ${err.message || err}`);
@@ -292,7 +432,11 @@ export class ReachabilityExplorer {
       }
     }
 
-    return null;
+    if (unmodeledReason) {
+      return { status: "UNMODELED", reason: unmodeledReason };
+    }
+
+    return { status: "NO_MODELED_LOSS" };
   }
 
   private async executeAction(action: Action): Promise<void> {
