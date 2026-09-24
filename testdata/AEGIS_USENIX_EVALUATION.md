@@ -5,7 +5,7 @@
 ## Inclusion Methodology & Protocol
 - **Dataset Source:** Official artifact from USENIX Security '26 containing 793 EOA detection records (718 unique contract addresses) across 7 production blockchains.
 - **Inclusion Criterion:** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)**.
-- **Evaluated Scope:** Full inclusion set $C$ of 58 real-world delegate contracts across 6 production chains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon), evaluated alongside 4 controlled protocol-negative cases.
+- **Evaluated Scope:** Full inclusion set $C$ of 58 chain-address cases (representing 53 unique delegate addresses and 47 unique runtime-bytecode hashes) across 6 production chains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon), evaluated alongside 4 controlled protocol-negative cases.
 - **Execution Pipeline:** Real bytecode deployed via `anvil_setCode` into ephemeral local Anvil Prague EVM state snapshots, evaluated under three deterministic states:
   - `FOUND_LOSS`: Reachability explorer discovers an executable multi-step exploit path causing $L(s_0, s') > 0$.
   - `NO_MODELED_LOSS`: Reachability explorer exhaustively searches supported candidate actions within bounded depth without finding asset loss.

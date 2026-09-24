@@ -47,9 +47,9 @@ This document contains precise, technically defensible answers to the five most 
 
 ---
 
-### Q4: Why is the detection rate 87.9% (51/58) rather than 100%?
+### Q4: Why is executable witness yield 87.9% (51/58) rather than 100%?
 
-> **Short Answer:** The 87.9% rate is **proof of empirical rigor**. Aegis7702 honestly reports contracts that require unmodeled external state or unsupported interfaces rather than forcing a false verdict.
+> **Short Answer:** An 87.9% executable witness yield is **proof of empirical rigor**. Aegis7702 honestly reports contracts that require unmodeled external state or unsupported interfaces rather than forcing a false verdict.
 
 #### Detailed Defense:
 - A benchmark that claims 100% on arbitrary real-world contracts is almost always hard-coded or tautological.
