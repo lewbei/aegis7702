@@ -14,11 +14,20 @@ export interface AnvilRpcClient {
   request(args: { method: string; params?: any[] }): Promise<any>;
 }
 
+export interface ActionProvider {
+  enumerateActions(
+    capability: Capability,
+    publicClient: PublicClient,
+    attacker: `0x${string}`
+  ): Promise<Action[]>;
+}
+
 export class ReachabilityExplorer {
   constructor(
     private publicClient: PublicClient,
     private rpcClient: AnvilRpcClient,
-    private maxDepth: number = 3
+    private maxDepth: number = 3,
+    private customActionProvider?: ActionProvider
   ) {}
 
   async explore(
@@ -78,9 +87,15 @@ export class ReachabilityExplorer {
     const owner = capability.owner;
     const token = this.getTokenFromCapability(capability);
 
-    // Enumerate candidate actions from semantic models
+    // Enumerate candidate actions from semantic models or decoupled custom action provider
     let actions: Action[] = [];
-    if (capability.kind === "PERMIT2_ALLOWANCE") {
+    if (this.customActionProvider) {
+      actions = await this.customActionProvider.enumerateActions(
+        capability,
+        this.publicClient,
+        attacker
+      );
+    } else if (capability.kind === "PERMIT2_ALLOWANCE") {
       actions = await Permit2AllowanceSemantics.enumerateActions(
         capability,
         this.publicClient,

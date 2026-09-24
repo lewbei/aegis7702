@@ -1,7 +1,7 @@
 # Aegis7702: Capability-Aware Multi-Step Reachability Verifier
 
 [![CI Verification & USENIX Benchmark](https://github.com/lewbei/aegis7702/actions/workflows/test.yml/badge.svg)](https://github.com/lewbei/aegis7702/actions)
-[![USENIX 2026 Benchmark: 51/58 Passing](https://img.shields.io/badge/USENIX%202026%20Benchmark-51%2F58%20(87.9%25)-emerald)](./testdata/AEGIS_USENIX_EVALUATION.md)
+[![Executable Witness Yield: 51/58](https://img.shields.io/badge/Executable%20Witness%20Yield-51%2F58%20(87.9%25)-emerald)](./testdata/AEGIS_USENIX_EVALUATION.md)
 [![Foundry Tests](https://img.shields.io/badge/Foundry-14%2F14%20Passing-emerald)](./contracts)
 [![TypeScript Engine](https://img.shields.io/badge/Engine-3%2F3%20Kill%20Tests%20Passing-cyan)](./engine)
 [![EIP-7702](https://img.shields.io/badge/EIP--7702-Prague%20Hardfork-blue)](https://eips.ethereum.org/EIPS/eip-7702)
@@ -21,7 +21,7 @@
 
 Instead of hand-crafted toy scenarios or ambiguous heuristic scores, Aegis7702 is empirically grounded in the **USENIX Security 2026** artifact (Huang et al.):
 
-| **58** Real Cases | **51 / 58** Exploit Witnesses (87.9%) | **51 / 51** Clean-State Replay | **51 / 51** Neutralized by Recovery |
+| **58** USENIX-derived chain-address cases | **51 / 58** Exploit Witnesses (87.9%) | **51 / 51** Clean-State Replay | **51 / 51** Neutralized by Recovery |
 | :---: | :---: | :---: | :---: |
 | Complete $C$ inclusion set across 6 chains | Executable EVM loss witnesses discovered | 100% concrete loss reproducibility on fresh state | 100% mitigated ($L=0$) via on-chain recovery |
 

@@ -17,12 +17,12 @@
 
 ---
 
-### [0:20 – 0:50] The Flawed Baseline: Current-Execution Blindness
-* **Visual:** Split screen. On the left: Conventional transaction simulator / wallet firewall (Blockaid / MetaMask baseline heuristic) showing a green shield: `SAFE ✅ | Immediate Balance Change: $0.00`.
+### [0:20 – 0:50] The Structural Baseline: Immediate-Delta Comparator B₀
+* **Visual:** Split screen. On the left: Structural immediate-delta comparator $B_0$ showing: `Immediate Balance Change: $0.00`.
 * **Voiceover:**
-  > *"Every mainstream wallet security tool today evaluates safety using single-step simulation: does this execution immediately take your tokens? Because an off-chain signature is detached from execution, conventional simulators evaluate delta zero and emit a reassuring 'SAFE' verdict. This is a catastrophic false negative."*
+  > *"On the left is our structural immediate-delta comparator B₀. We do not claim this reproduces Blockaid, MetaMask, or any commercial wallet-security product. B₀ asks only whether the signing event itself produces immediate tracked-asset loss. For detached authorization, that delta is zero by definition. A zero immediate balance delta cannot establish future capability safety."*
 * **Key On-Screen Text:**
-  > **Heuristic Failure:** $\text{SimulateCurrentExecution}(c, s_0) = \$0.00$ (100% Blind to Deferred Drains)
+  > **Comparator Focus:** $B_0(c, s_0) = \$0.00$ (Immediate Delta Blind to Deferred Capability Exploits)
 
 ---
 

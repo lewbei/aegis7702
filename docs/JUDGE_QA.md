@@ -41,7 +41,7 @@ This document contains precise, technically defensible answers to the five most 
 
 #### Detailed Defense:
 - We do not claim to perform "historical mainnet replays," because many of these malicious contracts were detected across six different L1/L2 chains (Ethereum, Base, BNB, Optimism, Arbitrum, Polygon) with diverse historical block states.
-- Instead, we took the complete intersection ($C = 58$ chain-address cases / 53 unique delegate addresses / 47 unique runtime bytecodes) of confirmed EOA-targeted attacks and sensitive drain functions from the artifact of Huang et al. (USENIX Security 2026).
+- Instead, we took the complete intersection ($C = 58$ chain-address cases / 53 unique delegate addresses / 47 unique runtime bytecodes) of EOA final-detection records intersected with sensitive-function detections from the published artifact of Huang et al. (USENIX Security 2026).
 - We loaded each contract's **exact artifact bytecode** via `anvil_setCode` into an ephemeral Prague-EVM snapshot with a victim account and measured whether the delegate could execute an unauthorized drain under valid EIP-7702 authorization.
 - The 58 bytecode hashes match the artifact files exactly and are fully checked into the repository (`testdata/usenix_bytecodes/`) and reproduced in GitHub Actions CI.
 
@@ -52,7 +52,7 @@ This document contains precise, technically defensible answers to the five most 
 > **Short Answer:** An 87.9% executable witness yield is **proof of empirical rigor**. Aegis7702 honestly reports contracts that require unmodeled external state or unsupported interfaces rather than forcing a false verdict.
 
 #### Detailed Defense:
-- A benchmark that claims 100% on arbitrary real-world contracts is almost always hard-coded or tautological.
+- The 87.9% yield reflects actual EVM execution under the standardized reconstruction: six modeled cases did not reach tracked loss and one interface was unsupported.
 - Aegis7702 enforces a strict three-state classification:
   - **`FOUND_LOSS` (51 / 58 = 87.9%):** Discovered an executable multi-step exploit path that successfully drained tracked funds.
   - **`NO_MODELED_LOSS` (6 / 58 = 10.3%):** Explored within bounded depth without finding loss. These contracts (such as certain `sweepTokens(address,uint256)` variants) require specific caller authorizations, non-zero internal contract states, or specific token balances beyond the victim's account. Because those preconditions were not satisfied, the execution safely reverted, and Aegis honestly reported no loss.
@@ -80,7 +80,7 @@ This document contains precise, technically defensible answers to the five most 
 
 #### Detailed Defense:
 - **Scope of the In-Distribution Benchmark:** The 58-case benchmark evaluates contracts where delegate bytecode exposes modeled capability action semantics (e.g., canonical `sweep` and `drain` interfaces).
-- **Out-of-Distribution Semantic-Coverage Test:** When evaluated against the remaining 735 holdout chain-address cases (520 unique runtime-bytecode hashes) from the USENIX EOA candidate dataset with `hackathon-final-v1.0.0` frozen:
+- **Out-of-Distribution Semantic-Coverage Test:** When evaluated against the remaining 735 chain-address cases (520 unique runtime-bytecode hashes) in the USENIX EOA final-detection corpus outside $C$ with `hackathon-final-v1.0.0` frozen:
   - **OOD Semantic Coverage:** $0 / 735$ ($0.00\%$)
   - **Abstention Rate (`UNMODELED`):** $735 / 735$ ($100.0\%$)
 - **Important Distinction:** `UNMODELED` is an explicit **abstention**, not a claim of safety or a true negative ($\text{UNMODELED} \neq \text{TRUE NEGATIVE}$). The system recognizes that it lacks the action semantics to model the contract's dispatcher (which includes obfuscated drainers like `loserSweepETH_...`, generic call forwarders like `executeCall(address,bytes)`, and multi-sigs like Safe).
