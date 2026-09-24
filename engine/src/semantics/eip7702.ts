@@ -1,14 +1,32 @@
 import { encodeFunctionData, PublicClient, Address } from "viem";
-import { Action, EIP7702Capability } from "../capability/types.js";
-import { MALICIOUS_DELEGATE_ABI, ERC20_ABI } from "../capability/abis.js";
+import { Action, ActionEnumeration, EIP7702Capability } from "../capability/types.js";
+import { ERC20_ABI } from "../capability/abis.js";
 
 export class EIP7702Semantics {
+  /**
+   * The canonical 6 malicious delegate interface families supported by v1.0 EIP-7702 semantics:
+   * 1. sweep(address,address) [0xb8dc491b / 0x89afcb44]
+   * 2. sweep(address[]) [0x780469bb]
+   * 3. drainToken(address,uint256) [0x9d4323be]
+   * 4. sweepERC20(address) [0xe00af4a7]
+   * 5. sweepTokens(address) [0xf5f6d3af]
+   * 6. sweepTokens(address,uint256) [0xdec66036]
+   */
+  static readonly MODELED_SELECTORS = [
+    "b8dc491b", // sweep(address,address)
+    "89afcb44", // sweep(address,address) alternate
+    "780469bb", // sweep(address[])
+    "9d4323be", // drainToken(address,uint256)
+    "e00af4a7", // sweepERC20(address)
+    "f5f6d3af", // sweepTokens(address)
+    "dec66036", // sweepTokens(address,uint256)
+  ] as const;
+
   static async enumerateActions(
     capability: EIP7702Capability,
     client: PublicClient,
     attacker: Address
-  ): Promise<Action[]> {
-    const actions: Action[] = [];
+  ): Promise<ActionEnumeration> {
     const owner = capability.owner;
     const token = capability.targetToken;
 
@@ -16,21 +34,30 @@ export class EIP7702Semantics {
     const currentNonce = await client.getTransactionCount({ address: owner });
     const currentBytecode = await client.getBytecode({ address: owner });
 
-    // 2. Inspect victim's token balance if a target token is monitored
-    let victimBalance = 0n;
-    if (token) {
-      victimBalance = await client.readContract({
-        address: token,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [owner]
-      });
-    }
-
     const hasDelegation =
       currentBytecode &&
       currentBytecode.length >= 48 &&
       currentBytecode.toLowerCase().startsWith("0xef0100");
+
+    const delegateAddress = hasDelegation
+      ? (("0x" + currentBytecode.slice(8, 48)) as Address)
+      : capability.delegateAddress;
+
+    // 2. Validate delegate interface support against authoritative modeled selectors
+    if (delegateAddress && delegateAddress !== "0x0000000000000000000000000000000000000000") {
+      const delegateCode = ((await client.getBytecode({ address: delegateAddress })) || "").toLowerCase();
+      if (delegateCode && delegateCode.length > 2) {
+        const isSupported = this.MODELED_SELECTORS.some((sel) => delegateCode.includes(sel));
+        if (!isSupported) {
+          return {
+            status: "UNMODELED",
+            reason: `Delegate ${delegateAddress} does not expose modeled EIP-7702 action selectors`
+          };
+        }
+      }
+    }
+
+    const actions: Action[] = [];
 
     // Action Type 1: Relay signed authorization via Type-4 transaction
     // Legal if delegation is not active and current on-chain nonce matches capability nonce
@@ -57,8 +84,17 @@ export class EIP7702Semantics {
 
     // Action Type 2: Execute delegate logic on the delegated EOA
     // Legal if delegation is currently installed on victim EOA and victim holds assets
+    let victimBalance = 0n;
+    if (token) {
+      victimBalance = await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [owner]
+      });
+    }
+
     if (hasDelegation && token && victimBalance > 0n) {
-      const delegateAddress = ("0x" + currentBytecode.slice(8, 48)) as Address;
       const delegateCode = ((await client.getBytecode({ address: delegateAddress })) || "").toLowerCase();
 
       // Interface 1: sweep(address,address)
@@ -209,6 +245,9 @@ export class EIP7702Semantics {
       }
     }
 
-    return actions;
+    return {
+      status: "MODELED",
+      actions
+    };
   }
 }

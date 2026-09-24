@@ -4,7 +4,7 @@ import {
   Hex,
   Hash
 } from "viem";
-import { Action, Counterexample, Capability, CapabilityKind } from "../capability/types.js";
+import { Action, Counterexample, Capability, CapabilityKind, EIP7702Capability } from "../capability/types.js";
 import { Permit2AllowanceSemantics } from "../semantics/permit2Allowance.js";
 import { Permit2SignatureSemantics } from "../semantics/permit2Signature.js";
 import { EIP7702Semantics } from "../semantics/eip7702.js";
@@ -93,48 +93,7 @@ export class BuiltinCapabilityActionProvider implements ActionProvider {
     }
 
     if (capability.kind === "EIP7702") {
-      const owner = capability.owner;
-      const currentBytecode = await publicClient.getBytecode({ address: owner });
-      const hasDelegation =
-        currentBytecode &&
-        currentBytecode.length >= 48 &&
-        currentBytecode.toLowerCase().startsWith("0xef0100");
-
-      const delegateAddress = hasDelegation
-        ? (("0x" + currentBytecode.slice(8, 48)) as `0x${string}`)
-        : capability.delegateAddress;
-
-      if (delegateAddress && delegateAddress !== "0x0000000000000000000000000000000000000000") {
-        const delegateCode = ((await publicClient.getBytecode({ address: delegateAddress })) || "").toLowerCase();
-        if (delegateCode && delegateCode.length > 2) {
-          // Check if delegate bytecode exposes ANY modeled interface
-          const isModeled =
-            delegateCode.includes("b8dc491b") || // sweep(address,address)
-            delegateCode.includes("89afcb44") ||
-            delegateCode.includes("780469bb") || // sweep(address[])
-            delegateCode.includes("0408544c") || // sweepTokens(address)
-            delegateCode.includes("9d4323be") ||
-            delegateCode.includes("e00af4a7") ||
-            delegateCode.includes("f5f6d3af") ||
-            delegateCode.includes("dec66036") ||
-            delegateCode.includes("48d17cfd") || // drainToken(address,uint256)
-            delegateCode.includes("45cf19a8") ||
-            delegateCode.includes("2ae985de") ||
-            delegateCode.includes("fc1e0178") || // sweepERC20(address)
-            delegateCode.includes("1cff79cd") || // execute(address,uint256,bytes)
-            delegateCode.includes("b61d27f6");   // executeCall(address,bytes)
-
-          if (!isModeled) {
-            return {
-              status: "UNMODELED",
-              reason: `Delegate ${delegateAddress} does not expose modeled EIP-7702 action selectors`
-            };
-          }
-        }
-      }
-
-      const actions = await EIP7702Semantics.enumerateActions(capability, publicClient, attacker);
-      return { status: "MODELED", actions };
+      return EIP7702Semantics.enumerateActions(capability as EIP7702Capability, publicClient, attacker);
     }
 
     return {

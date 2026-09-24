@@ -61,6 +61,16 @@ export interface Action {
   authorizationList?: any[];
 }
 
+export type ActionEnumeration =
+  | {
+      status: "MODELED";
+      actions: Action[];
+    }
+  | {
+      status: "UNMODELED";
+      reason: string;
+    };
+
 export interface SearchNode {
   depth: number;
   snapshotId: Hex;
