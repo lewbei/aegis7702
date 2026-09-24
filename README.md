@@ -1,11 +1,11 @@
-# Guard7702: Capability-Aware Multi-Step Reachability Verifier
+# Aegis7702: Capability-Aware Multi-Step Reachability Verifier
 
 [![Foundry Tests](https://img.shields.io/badge/Foundry-13%2F13%20Passing-emerald)](./contracts)
 [![TypeScript Engine](https://img.shields.io/badge/Engine-3%2F3%20Kill%20Tests%20Passing-cyan)](./engine)
 [![EIP-7702](https://img.shields.io/badge/EIP--7702-Prague%20Hardfork-blue)](https://eips.ethereum.org/EIPS/eip-7702)
 [![Uniswap Permit2](https://img.shields.io/badge/Uniswap-Permit2%20Allowance%20%26%20Signature-purple)](https://github.com/Uniswap/permit2)
 
-> **Guard7702** is a typed, executable capability-reachability verifier and state-specific recovery synthesizer for Ethereum Prague EIP-7702 authorizations and Uniswap Permit2 signatures.
+> **Aegis7702** is a typed, executable capability-reachability verifier and state-specific recovery synthesizer for Ethereum Prague EIP-7702 authorizations and Uniswap Permit2 signatures.
 >
 > Built for the **3rd-Web-Hack Hackathon** (TechZap Club, Sept 2026).
 
