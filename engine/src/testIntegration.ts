@@ -399,6 +399,34 @@ async function runIntegrationTests() {
     }
     console.log(`     ✓ Forbidden cloud metadata SSRF successfully blocked: "${ssrfData.error}"`);
 
+    // Subtest 7C.3: DNS resolution SSRF rejection for domain resolving to 127.0.0.1 (nip.io)
+    console.log("  -> Subtest 7C.3: DNS resolution SSRF rejection (127.0.0.1.nip.io)...");
+    const dnsSsrfRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: validAuth.address,
+          chainId: validAuth.chainId,
+          nonce: validAuth.nonce,
+          yParity: validAuth.yParity,
+          r: validAuth.r,
+          s: validAuth.s
+        },
+        forkUrl: "http://127.0.0.1.nip.io:8545"
+      })
+    });
+    if (dnsSsrfRes.status !== 400) {
+      throw new Error(`Expected HTTP 400 for DNS SSRF target but got ${dnsSsrfRes.status}`);
+    }
+    const dnsSsrfData = await dnsSsrfRes.json();
+    if (!dnsSsrfData.error || !dnsSsrfData.error.includes("SSRF rejected")) {
+      throw new Error(`Expected SSRF error message for nip.io target, got ${JSON.stringify(dnsSsrfData)}`);
+    }
+    console.log(`     ✓ DNS rebinding / resolved loopback SSRF blocked: "${dnsSsrfData.error}"`);
+
     // Subtest 7C.2: State chainId mismatch rejection (Fail Closed HTTP 400)
     console.log("  -> Subtest 7C.2: State chainId mismatch rejection (Fail Closed HTTP 400)...");
     const mainnetAuth = await signAuthorization(
@@ -464,7 +492,7 @@ async function runIntegrationTests() {
     console.log(`     ✓ Wallet-signable recovery plan synthesized: strategy=${planData.strategy}, txs=${planData.walletTransactions.length}, preconditions=${JSON.stringify(planData.preconditions)}`);
 
     // Subtest 7E: State-Race Precondition Failure Detection
-    console.log("  -> Subtest 7E: State-race precondition failure defense in /api/recover...");
+    console.log("  -> Subtest 7E: State-race account nonce mismatch defense in /api/recover...");
     const raceSession = await (
       await fetch(`${BASE_URL}/api/analyze`, {
         method: "POST",
@@ -485,7 +513,23 @@ async function runIntegrationTests() {
     if (raceRecoverData.status !== "STATE_PRECONDITION_FAILED") {
       throw new Error(`Expected STATE_PRECONDITION_FAILED for nonce mismatch, got ${JSON.stringify(raceRecoverData)}`);
     }
-    console.log(`     ✓ State-race regression defense triggered: status=${raceRecoverData.status}, reason="${raceRecoverData.reason}"`);
+    console.log(`     ✓ State-race nonce mismatch triggered: status=${raceRecoverData.status}, reason="${raceRecoverData.reason}"`);
+
+    // Subtest 7E.1: Bytecode mismatch triggers STATE_PRECONDITION_FAILED
+    console.log("  -> Subtest 7E.1: State-race expectedBytecode mismatch defense in /api/recover...");
+    const bytecodeRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: raceSession.runId,
+        expectedBytecode: "0xdeadbeef" // Intentionally diverged bytecode
+      })
+    });
+    const bytecodeRecoverData = await bytecodeRecoverRes.json();
+    if (bytecodeRecoverData.status !== "STATE_PRECONDITION_FAILED") {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED for bytecode mismatch, got ${JSON.stringify(bytecodeRecoverData)}`);
+    }
+    console.log(`     ✓ State-race bytecode mismatch triggered: status=${bytecodeRecoverData.status}, reason="${bytecodeRecoverData.reason}"`);
 
     // Clean up raceSession
     await fetch(`${BASE_URL}/api/replay`, {
@@ -493,6 +537,121 @@ async function runIntegrationTests() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ runId: raceSession.runId })
     });
+
+    // Subtest 7E.2: Permit2 allowance nonce mismatch triggers STATE_PRECONDITION_FAILED
+    console.log("  -> Subtest 7E.2: Permit2 allowance expectedPermitNonce mismatch defense in /api/recover...");
+    const p2Session = await (
+      await fetch(`${BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId: "permit2_allowance" })
+      })
+    ).json();
+
+    const p2RecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: p2Session.runId,
+        expectedPermitNonce: 999999
+      })
+    });
+    const p2RecoverData = await p2RecoverRes.json();
+    if (p2RecoverData.status !== "STATE_PRECONDITION_FAILED") {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED for Permit2 nonce mismatch, got ${JSON.stringify(p2RecoverData)}`);
+    }
+    console.log(`     ✓ Permit2 allowance nonce mismatch triggered: status=${p2RecoverData.status}, reason="${p2RecoverData.reason}"`);
+
+    // Clean up p2Session
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: p2Session.runId })
+    });
+
+    // Subtest 7E.3: Permit2 signature bitmap word mismatch triggers STATE_PRECONDITION_FAILED
+    console.log("  -> Subtest 7E.3: Permit2 signature expectedNonceBitmapWord mismatch defense in /api/recover...");
+    const p2SigSession = await (
+      await fetch(`${BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId: "permit2_signature" })
+      })
+    ).json();
+
+    const p2SigRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: p2SigSession.runId,
+        expectedNonceBitmapWord: "999999999999999999"
+      })
+    });
+    const p2SigRecoverData = await p2SigRecoverRes.json();
+    if (p2SigRecoverData.status !== "STATE_PRECONDITION_FAILED") {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED for Permit2 bitmap word mismatch, got ${JSON.stringify(p2SigRecoverData)}`);
+    }
+    console.log(`     ✓ Permit2 signature bitmap word mismatch triggered: status=${p2SigRecoverData.status}, reason="${p2SigRecoverData.reason}"`);
+
+    // Clean up p2SigSession
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: p2SigSession.runId })
+    });
+
+    // Subtest 7F: Concurrency limit saturation (activeWorkers >= 4) returns HTTP 429
+    console.log("  -> Subtest 7F: Worker pool saturation concurrency limit (MAX_CONCURRENT_WORKERS = 4 -> HTTP 429)...");
+    const activeSessions: any[] = [];
+    try {
+      for (let i = 0; i < 4; i++) {
+        const sRes = await fetch(`${BASE_URL}/api/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenarioId: "permit2_allowance" })
+        });
+        if (!sRes.ok) throw new Error(`Failed spawning session ${i + 1}: ${await sRes.text()}`);
+        activeSessions.push(await sRes.json());
+      }
+      console.log(`     ✓ 4 worker sessions spawned, pool saturated`);
+
+      const satRes = await fetch(`${BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId: "permit2_allowance" })
+      });
+      if (satRes.status !== 429) {
+        throw new Error(`Expected HTTP 429 for saturated worker pool but got ${satRes.status}`);
+      }
+      const satData = await satRes.json();
+      if (!satData.error || !satData.error.includes("Worker pool saturated")) {
+        throw new Error(`Expected Worker pool saturated error, got ${JSON.stringify(satData)}`);
+      }
+      console.log(`     ✓ 5th concurrent session rejected with HTTP 429 Too Many Requests: "${satData.error}"`);
+    } finally {
+      for (const s of activeSessions) {
+        await fetch(`${BASE_URL}/api/replay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ runId: s.runId })
+        });
+      }
+      console.log(`     ✓ All saturated worker sessions released`);
+    }
+
+    const freedRes = await fetch(`${BASE_URL}/api/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenarioId: "permit2_allowance" })
+    });
+    if (!freedRes.ok) throw new Error(`Expected 200 OK after pool release, got ${freedRes.status}`);
+    const freedData = await freedRes.json();
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: freedData.runId })
+    });
+    console.log(`     ✓ Worker pool successfully reclaimed: new session allocated and cleaned up`);
 
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");

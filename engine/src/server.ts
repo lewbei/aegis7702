@@ -2,6 +2,7 @@ import http from "http";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import * as dns from "dns";
 import { fileURLToPath } from "url";
 import {
   createPublicClient,
@@ -26,7 +27,13 @@ import { decodePermit2Signature } from "./capability/decodePermit2Signature.js";
 import { decode7702 } from "./capability/decode7702.js";
 import { ERC20_ABI, PERMIT2_ABI } from "./capability/abis.js";
 import { CapabilityValidator } from "./capability/validator.js";
-import { Capability, VerificationOutcome, ProspectiveRisk } from "./capability/types.js";
+import {
+  Capability,
+  Permit2AllowanceCapability,
+  Permit2SignatureCapability,
+  VerificationOutcome,
+  ProspectiveRisk
+} from "./capability/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,6 +97,7 @@ interface ActiveSession {
   tokenAddress: Address;
   delegateAddress?: Address;
   initialBalance: bigint;
+  createdAt: number;
 }
 
 const sessions = new Map<string, ActiveSession>();
@@ -97,9 +105,46 @@ let nextPort = 8600;
 
 let activeWorkers = 0;
 const MAX_CONCURRENT_WORKERS = 4;
-const WORKER_TIMEOUT_MS = 30000;
+const WORKER_TIMEOUT_MS = Number(process.env.WORKER_TIMEOUT_MS ?? 30000);
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-export function validateForkUrl(urlStr: string): void {
+// Periodic session sweeper
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, sess] of sessions.entries()) {
+    if (sess.createdAt && now - sess.createdAt > SESSION_TTL_MS) {
+      try {
+        sess.anvilProcess.kill();
+      } catch {}
+      sessions.delete(id);
+    }
+  }
+}, 30000).unref();
+
+export function isPrivateIp(ip: string): boolean {
+  const ipv4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [_, o1, o2, o3, o4] = ipv4.map(Number);
+    if (o1 === 0 || o1 === 10 || o1 === 127 || (o1 === 169 && o2 === 254) || (o1 === 172 && o2 >= 16 && o2 <= 31) || (o1 === 192 && o2 === 168) || o1 >= 224) {
+      return true;
+    }
+    return false;
+  }
+  const norm = ip.toLowerCase();
+  if (
+    norm === "::1" ||
+    norm === "::" ||
+    norm.startsWith("fe80:") ||
+    norm.startsWith("fc") ||
+    norm.startsWith("fd") ||
+    norm.includes("127.0.0.1")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export async function validateForkUrl(urlStr: string): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
@@ -113,7 +158,7 @@ export function validateForkUrl(urlStr: string): void {
 
   const hostname = parsed.hostname.toLowerCase();
 
-  // Block localhost / loopback / cloud metadata endpoints
+  // Block localhost / loopback / cloud metadata endpoints immediately
   if (
     hostname === "localhost" ||
     hostname === "127.0.0.1" ||
@@ -125,16 +170,25 @@ export function validateForkUrl(urlStr: string): void {
     throw new Error(`SSRF rejected: forkUrl targeting loopback/metadata endpoint (${hostname}) is forbidden`);
   }
 
-  // Parse IPv4 octets to block RFC 1918 / link-local / loopback
-  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const [_, o1, o2, o3, o4] = ipv4Match.map(Number);
-    if (o1 === 10) throw new Error(`SSRF rejected: private IPv4 range 10.0.0.0/8 is forbidden`);
-    if (o1 === 127) throw new Error(`SSRF rejected: loopback IPv4 range 127.0.0.0/8 is forbidden`);
-    if (o1 === 169 && o2 === 254) throw new Error(`SSRF rejected: link-local IPv4 range 169.254.0.0/16 is forbidden`);
-    if (o1 === 172 && o2 >= 16 && o2 <= 31) throw new Error(`SSRF rejected: private IPv4 range 172.16.0.0/12 is forbidden`);
-    if (o1 === 192 && o2 === 168) throw new Error(`SSRF rejected: private IPv4 range 192.168.0.0/16 is forbidden`);
-    if (o1 === 0) throw new Error(`SSRF rejected: zero network IPv4 is forbidden`);
+  if (isPrivateIp(hostname)) {
+    throw new Error(`SSRF rejected: forkUrl targeting private/internal IP (${hostname}) is forbidden`);
+  }
+
+  // Resolve DNS A and AAAA records to prevent DNS rebinding / internal resolution bypass
+  try {
+    const addresses = await dns.promises.lookup(hostname, { all: true });
+    for (const record of addresses) {
+      if (isPrivateIp(record.address)) {
+        throw new Error(
+          `SSRF rejected: hostname '${hostname}' resolves to forbidden internal IP (${record.address})`
+        );
+      }
+    }
+  } catch (err: any) {
+    if (err.message && err.message.startsWith("SSRF rejected")) {
+      throw err;
+    }
+    throw new Error(`SSRF rejected: cannot resolve forkUrl hostname '${hostname}': ${err.code ?? err.message}`);
   }
 }
 
@@ -159,8 +213,16 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: any) {
 
 async function startEphemeralAnvil(hardfork?: string, forkUrl?: string): Promise<{ process: ChildProcess; port: number }> {
   if (forkUrl) {
-    validateForkUrl(forkUrl);
+    await validateForkUrl(forkUrl);
   }
+
+  if (activeWorkers >= MAX_CONCURRENT_WORKERS) {
+    throw new Error(
+      `Worker pool saturated: maximum concurrent analysis limit (${MAX_CONCURRENT_WORKERS}) reached. Please retry.`
+    );
+  }
+
+  activeWorkers++;
   const port = nextPort++;
   const args = ["--port", port.toString(), "--silent"];
   if (hardfork) {
@@ -170,6 +232,18 @@ async function startEphemeralAnvil(hardfork?: string, forkUrl?: string): Promise
     args.push("--fork-url", forkUrl);
   }
   const anvil = spawn(ANVIL_BIN, args);
+
+  let decremented = false;
+  const decrement = () => {
+    if (!decremented) {
+      decremented = true;
+      activeWorkers = Math.max(0, activeWorkers - 1);
+    }
+  };
+  anvil.once("exit", decrement);
+  anvil.once("close", decrement);
+  anvil.once("error", decrement);
+
   await new Promise((resolve) => setTimeout(resolve, 1500));
   return { process: anvil, port };
 }
@@ -364,7 +438,8 @@ async function handleAnalyze(body: any): Promise<any> {
       prospectiveRisk,
       recoveryPlan,
       tokenAddress: usdcAddress,
-      initialBalance: DRAIN_AMOUNT
+      initialBalance: DRAIN_AMOUNT,
+      createdAt: Date.now()
     });
 
     return {
@@ -494,7 +569,8 @@ async function handleAnalyze(body: any): Promise<any> {
       prospectiveRisk,
       recoveryPlan,
       tokenAddress: usdcAddress,
-      initialBalance: DRAIN_AMOUNT
+      initialBalance: DRAIN_AMOUNT,
+      createdAt: Date.now()
     });
 
     return {
@@ -680,7 +756,8 @@ async function handleAnalyze(body: any): Promise<any> {
       recoveryPlan,
       tokenAddress: usdcAddress,
       delegateAddress,
-      initialBalance: INITIAL_USDC
+      initialBalance: INITIAL_USDC,
+      createdAt: Date.now()
     });
 
     return {
@@ -706,7 +783,18 @@ async function handleAnalyze(body: any): Promise<any> {
 }
 
 async function handleRecover(body: any): Promise<any> {
-  const { runId, expectedAccountNonce, expectedActiveDelegation } = body;
+  const {
+    runId,
+    expectedAccountNonce,
+    expectedActiveDelegation,
+    expectedBytecode,
+    expectedPermitNonce,
+    expectedAllowedAmount,
+    expectedNonceBitmapWord,
+    token,
+    spender,
+    wordPos
+  } = body;
   const session = sessions.get(runId);
   if (!session) {
     throw new Error(`Session ${runId} not found or expired`);
@@ -739,6 +827,78 @@ async function handleRecover(body: any): Promise<any> {
         reason: `State race detected: on-chain delegation state changed (expected active: ${expectedActiveDelegation}, actual: ${currentlyDelegated}). Recovery aborted to prevent state regression.`,
         totalTxsExecuted: 0
       };
+    }
+  }
+
+  if (expectedBytecode !== undefined) {
+    const actualCode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
+    if (actualCode.toLowerCase() !== String(expectedBytecode).toLowerCase()) {
+      return {
+        runId,
+        status: "STATE_PRECONDITION_FAILED",
+        reason: `State race detected: on-chain account bytecode changed (expected: ${expectedBytecode}, actual: ${actualCode}). Recovery aborted to prevent state regression.`,
+        totalTxsExecuted: 0
+      };
+    }
+  }
+
+  if (expectedPermitNonce !== undefined || expectedAllowedAmount !== undefined) {
+    const permit2 = (session.capability as any)?.permit2Address ?? body.permit2Address;
+    const tokenAddr = token ?? (session.capability as any)?.details?.token;
+    const spenderAddr = spender ?? (session.capability as any)?.spender;
+    if (permit2 && tokenAddr && spenderAddr) {
+      const [actualAllowedAmount, , actualPermitNonce] = await publicClient.readContract({
+        address: permit2,
+        abi: PERMIT2_ABI,
+        functionName: "allowance",
+        args: [victim, tokenAddr, spenderAddr]
+      });
+
+      if (expectedPermitNonce !== undefined && BigInt(actualPermitNonce) !== BigInt(expectedPermitNonce)) {
+        return {
+          runId,
+          status: "STATE_PRECONDITION_FAILED",
+          reason: `State race detected: Permit2 allowance nonce changed from ${expectedPermitNonce} to ${actualPermitNonce}. Recovery aborted to prevent state regression.`,
+          totalTxsExecuted: 0
+        };
+      }
+
+      if (expectedAllowedAmount !== undefined && BigInt(actualAllowedAmount) !== BigInt(expectedAllowedAmount)) {
+        return {
+          runId,
+          status: "STATE_PRECONDITION_FAILED",
+          reason: `State race detected: Permit2 allowed amount changed from ${expectedAllowedAmount} to ${actualAllowedAmount}. Recovery aborted to prevent state regression.`,
+          totalTxsExecuted: 0
+        };
+      }
+    }
+  }
+
+  if (expectedNonceBitmapWord !== undefined) {
+    const permit2 = (session.capability as any)?.permit2Address ?? body.permit2Address;
+    const calcWordPos =
+      wordPos !== undefined
+        ? BigInt(wordPos)
+        : (session.capability as any)?.nonce !== undefined
+        ? (session.capability as any).nonce >> 8n
+        : undefined;
+
+    if (permit2 && calcWordPos !== undefined) {
+      const actualWord: bigint = await publicClient.readContract({
+        address: permit2,
+        abi: PERMIT2_ABI,
+        functionName: "nonceBitmap",
+        args: [victim, calcWordPos]
+      });
+
+      if (BigInt(actualWord) !== BigInt(expectedNonceBitmapWord)) {
+        return {
+          runId,
+          status: "STATE_PRECONDITION_FAILED",
+          reason: `State race detected: Permit2 signature nonce bitmap word changed (expected: ${expectedNonceBitmapWord}, actual: ${actualWord}). Recovery aborted to prevent state regression.`,
+          totalTxsExecuted: 0
+        };
+      }
     }
   }
 
@@ -1004,7 +1164,7 @@ async function handleReplay(body: any): Promise<any> {
   };
 }
 
-async function executeAnalyzeCapability(body: any): Promise<any> {
+async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildProcess }): Promise<any> {
   const { type, payload, attackerAddress, forkUrl: rawForkUrl, rpcUrl } = body;
   if (!type || !payload) {
     throw new Error("Missing required fields: 'type' and 'payload' must be provided");
@@ -1045,6 +1205,7 @@ async function executeAnalyzeCapability(body: any): Promise<any> {
   const is7702 = capability.kind === "EIP7702";
   const forkUrl = rawForkUrl || rpcUrl;
   const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
+  if (ctx) ctx.anvilProcess = anvilProcess;
   const anvilRpcUrl = `http://127.0.0.1:${anvilPort}`;
   const publicClient = createPublicClient({ transport: viemHttp(anvilRpcUrl) });
   const attacker = attackerAddress ? getAddress(attackerAddress) : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
@@ -1136,25 +1297,24 @@ async function executeAnalyzeCapability(body: any): Promise<any> {
 }
 
 async function handleAnalyzeCapability(body: any): Promise<any> {
-  if (activeWorkers >= MAX_CONCURRENT_WORKERS) {
-    throw new Error(
-      `Worker pool saturated: maximum concurrent analysis limit (${MAX_CONCURRENT_WORKERS}) reached. Please retry.`
-    );
-  }
-
-  activeWorkers++;
+  const ctx: { anvilProcess?: ChildProcess } = {};
+  let timer: NodeJS.Timeout | null = null;
   try {
     return await Promise.race([
-      executeAnalyzeCapability(body),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Analysis timed out after ${WORKER_TIMEOUT_MS / 1000}s`)),
-          WORKER_TIMEOUT_MS
-        )
-      )
+      executeAnalyzeCapability(body, ctx),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          if (ctx.anvilProcess) {
+            try {
+              ctx.anvilProcess.kill("SIGKILL");
+            } catch {}
+          }
+          reject(new Error(`Analysis timed out after ${WORKER_TIMEOUT_MS / 1000}s`));
+        }, WORKER_TIMEOUT_MS);
+      })
     ]);
   } finally {
-    activeWorkers--;
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -1225,17 +1385,63 @@ async function handleRecoveryPlan(body: any): Promise<any> {
       }
     }
 
-    return {
-      runId,
-      strategy: recoveryPlan.strategy,
-      description: recoveryPlan.description,
-      preconditions: {
+    let preconditions: any;
+    if (
+      canonicalId === "eip7702" ||
+      canonicalId === "eip7702_future_nonce" ||
+      canonicalId === "eip7702_active_delegation"
+    ) {
+      preconditions = {
         accountAddress: victim,
         expectedAccountNonce: currentNonce,
         expectedBytecode: currentBytecode,
         expectedActiveDelegation: hasDelegation,
         chainId: Number(capability.chainId)
-      },
+      };
+    } else if (
+      canonicalId === "permit2_allowance" ||
+      canonicalId === "permit2_future_delta_65535" ||
+      canonicalId === "permit2_future_delta_65536"
+    ) {
+      const p2Cap = capability as Permit2AllowanceCapability;
+      const [allowedAmount, , permitNonce] = await publicClient.readContract({
+        address: p2Cap.permit2Address,
+        abi: PERMIT2_ABI,
+        functionName: "allowance",
+        args: [victim, p2Cap.details.token, p2Cap.spender]
+      });
+      preconditions = {
+        accountAddress: victim,
+        permit2Address: p2Cap.permit2Address,
+        token: p2Cap.details.token,
+        spender: p2Cap.spender,
+        expectedPermitNonce: Number(permitNonce),
+        expectedAllowedAmount: allowedAmount.toString(),
+        chainId: Number(capability.chainId)
+      };
+    } else if (canonicalId === "permit2_signature") {
+      const p2SigCap = capability as Permit2SignatureCapability;
+      const wordPos = p2SigCap.nonce >> 8n;
+      const currentWord: bigint = await publicClient.readContract({
+        address: p2SigCap.permit2Address,
+        abi: PERMIT2_ABI,
+        functionName: "nonceBitmap",
+        args: [victim, wordPos]
+      });
+      preconditions = {
+        accountAddress: victim,
+        permit2Address: p2SigCap.permit2Address,
+        wordPos: wordPos.toString(),
+        expectedNonceBitmapWord: currentWord.toString(),
+        chainId: Number(capability.chainId)
+      };
+    }
+
+    return {
+      runId,
+      strategy: recoveryPlan.strategy,
+      description: recoveryPlan.description,
+      preconditions,
       walletTransactions
     };
   }
@@ -1336,16 +1542,54 @@ async function handleRecoveryPlan(body: any): Promise<any> {
       }
     }
 
-    return {
-      strategy: recoveryPlan.strategy,
-      description: recoveryPlan.description,
-      preconditions: {
+    let preconditions: any;
+    if (capability.kind === "EIP7702") {
+      preconditions = {
         accountAddress: owner,
         expectedAccountNonce: currentNonce,
         expectedBytecode: currentBytecode,
         expectedActiveDelegation: hasDelegation,
         chainId: Number(capability.chainId)
-      },
+      };
+    } else if (capability.kind === "PERMIT2_ALLOWANCE") {
+      const p2Cap = capability as Permit2AllowanceCapability;
+      const [allowedAmount, , permitNonce] = await publicClient.readContract({
+        address: p2Cap.permit2Address,
+        abi: PERMIT2_ABI,
+        functionName: "allowance",
+        args: [owner, p2Cap.details.token, p2Cap.spender]
+      });
+      preconditions = {
+        accountAddress: owner,
+        permit2Address: p2Cap.permit2Address,
+        token: p2Cap.details.token,
+        spender: p2Cap.spender,
+        expectedPermitNonce: Number(permitNonce),
+        expectedAllowedAmount: allowedAmount.toString(),
+        chainId: Number(capability.chainId)
+      };
+    } else {
+      const p2SigCap = capability as Permit2SignatureCapability;
+      const wordPos = p2SigCap.nonce >> 8n;
+      const currentWord: bigint = await publicClient.readContract({
+        address: p2SigCap.permit2Address,
+        abi: PERMIT2_ABI,
+        functionName: "nonceBitmap",
+        args: [owner, wordPos]
+      });
+      preconditions = {
+        accountAddress: owner,
+        permit2Address: p2SigCap.permit2Address,
+        wordPos: wordPos.toString(),
+        expectedNonceBitmapWord: currentWord.toString(),
+        chainId: Number(capability.chainId)
+      };
+    }
+
+    return {
+      strategy: recoveryPlan.strategy,
+      description: recoveryPlan.description,
+      preconditions,
       walletTransactions
     };
   } finally {

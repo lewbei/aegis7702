@@ -4,7 +4,7 @@
 **Project Name:** Aegis7702  
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
-**Release Tag:** [`hackathon-final-v1.0.7`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.7)  
+**Release Tag:** [`hackathon-final-v1.0.8`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.8)  
 **Latest Verified Release CI Run:** [GitHub Actions Run #36107062564](https://github.com/lewbei/aegis7702/actions/runs/36107062564) (4/4 jobs green)  
 **Reference Benchmark CI Run:** [GitHub Actions Run #36107062564](https://github.com/lewbei/aegis7702/actions/runs/36107062564) (4/4 jobs green)  
 
@@ -123,9 +123,12 @@ Aegis7702 proves that:
 
 ## 7. Production Hardening & Security Defenses
 
-1. **SSRF Defense Layer:** Validates all user-supplied `forkUrl` endpoints via strict hostname/IP parsing. Automatically blocks localhost, loopback (`127.0.0.0/8`, `::1`), private RFC1918 CIDRs (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), zero-network (`0.0.0.0/8`), link-local (`169.254.0.0/16`), and cloud instance metadata endpoints (`metadata.google.internal`).
-2. **Worker Pool & Watchdog Concurrency Limiting:** Restricts simultaneous on-demand reachability verifications to 4 concurrent worker slots with an automated 30-second timeout watchdog, preventing Denial-of-Service via unbounded Anvil fork spawns.
+1. **SSRF Defense Layer with Asynchronous DNS Resolution:** Validates all user-supplied `forkUrl` endpoints via strict hostname/IP parsing and asynchronous DNS resolution (`dns.promises.lookup` with `all: true`). Automatically blocks localhost, loopback (`127.0.0.0/8`, `::1`), private RFC1918 CIDRs (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), zero-network (`0.0.0.0/8`), link-local (`169.254.0.0/16`), cloud instance metadata endpoints (`169.254.169.254`, `metadata.google.internal`), and DNS rebinding hostnames (such as `127.0.0.1.nip.io`).
+2. **Worker Pool & Watchdog Concurrency Limiting:** Restricts simultaneous on-demand reachability verifications to 4 concurrent worker slots globally at Anvil process spawn time (`MAX_CONCURRENT_WORKERS = 4` -> HTTP 429 Too Many Requests) with an automated 30-second timeout watchdog that explicitly terminates child processes (`SIGKILL`), preventing Denial-of-Service or orphaned background processes.
 3. **Multi-Capability Portfolio Auditor (`MultiCapabilityAuditor`):** Moves beyond single-trace replay by evaluating an account's complete capability portfolio (`CapabilitySet`) across isolated state snapshots $s_R$, catching residual vulnerabilities (such as unrevoked Permit2 allowances) when an EIP-7702 delegation is cleared.
-4. **Wallet-Signable Recovery API (`POST /api/recovery-plan`):** Generates unsigned transaction envelopes formatted for native `window.ethereum.request({ method: 'eth_sendTransaction' })` wallet prompts alongside cryptographic state preconditions.
-5. **State-Race Precondition Guard (`STATE_PRECONDITION_FAILED`):** Rejects recovery execution with HTTP 409 if the on-chain account nonce or delegation status changes between reachability verification and recovery dispatch.
+4. **Wallet-Signable Recovery API (`POST /api/recovery-plan`):** Generates unsigned transaction envelopes formatted for native `window.ethereum.request({ method: 'eth_sendTransaction' })` wallet prompts alongside typed cryptographic state preconditions across EIP-7702 and Permit2.
+5. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery execution with `STATE_PRECONDITION_FAILED` if any on-chain state changes between reachability verification and recovery dispatch:
+   - EIP-7702: Account nonce mismatch (`expectedAccountNonce`), active delegation status mismatch (`expectedActiveDelegation`), or bytecode divergence (`expectedBytecode`).
+   - Permit2 Allowance: Nonce mismatch (`expectedPermitNonce`) or allowance amount divergence (`expectedAllowedAmount`).
+   - Permit2 Signature: Nonce bitmap word divergence (`expectedNonceBitmapWord`).
 

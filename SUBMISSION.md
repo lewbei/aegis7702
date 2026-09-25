@@ -185,10 +185,10 @@ Aegis7702 includes a dedicated suite of adversarial stress tests verifying bound
 2. **EIP-7702 Active Delegation Clearance:** When malicious code is already actively installed (`0xef0100...`), Aegis7702 synthesizes a Type-4 transaction with authorization pointing to `address(0)` signed with `currentNonce + 1`, resetting the account bytecode back to a clean EOA (`0x`) and proving on-chain that subsequent attacker calls revert.
 3. **Permit2 Nonce Delta Single-Chunk Boundary ($\Delta = 65,535$):** Successfully executes a maximum single-transaction invalidation on Permit2's `uint48` counter.
 4. **Permit2 Nonce Delta Multi-Chunk Boundary ($\Delta = 65,536$):** Detects delta exceeding Permit2's `ExcessiveInvalidation` threshold and splits the recovery into 2 chunked transactions ($65,535 + 1$), avoiding reverts.
-5. **SSRF Defense Layer:** Validates user-supplied `forkUrl` endpoints, blocking loopback, private RFC1918 IPv4 CIDRs, link-local, and cloud instance metadata (`169.254.169.254`, `metadata.google.internal`).
-6. **Worker Pool & Concurrency Limiting:** Restricts concurrent on-demand verification jobs to 4 workers with a 30s timeout watchdog.
-7. **Wallet-Signable Recovery Plans (`POST /api/recovery-plan`):** Emits unsigned transaction envelopes formatted for `window.ethereum.request` alongside expected on-chain state preconditions.
-8. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery with HTTP 409 if the on-chain account nonce or active delegation changes before recovery broadcast.
+5. **SSRF Defense Layer with Asynchronous DNS Resolution:** Validates user-supplied `forkUrl` endpoints via strict hostname/IP parsing and asynchronous DNS resolution (`dns.promises.lookup` with `all: true`), blocking loopback, private RFC1918 IPv4 CIDRs, link-local, cloud instance metadata (`169.254.169.254`, `metadata.google.internal`), and DNS rebinding hostnames (`127.0.0.1.nip.io`).
+6. **Worker Pool & Concurrency Limiting:** Restricts concurrent on-demand verification jobs to 4 workers globally at Anvil spawn time (`MAX_CONCURRENT_WORKERS = 4` -> HTTP 429) with a 30s timeout watchdog that explicitly terminates child processes (`SIGKILL`), preventing orphan process leaks.
+7. **Wallet-Signable Recovery Plans (`POST /api/recovery-plan`):** Emits unsigned transaction envelopes formatted for `window.ethereum.request` alongside typed on-chain state preconditions for EIP-7702, Permit2 Allowance, and Permit2 Signature.
+8. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery with `STATE_PRECONDITION_FAILED` if on-chain state changes before recovery broadcast, covering EIP-7702 account nonces, delegations, bytecode, Permit2 allowance nonces and amounts, and Permit2 signature bitmap words.
 9. **Fail-Closed API Rejection:** Invalid or malformed scenario payloads return deterministic HTTP 400 Bad Request responses rather than hanging or emitting false safety verdicts.
 
 ---
