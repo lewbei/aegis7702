@@ -114,14 +114,17 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: any) {
   }
 }
 
-async function startEphemeralAnvil(hardfork?: string): Promise<{ process: ChildProcess; port: number }> {
+async function startEphemeralAnvil(hardfork?: string, forkUrl?: string): Promise<{ process: ChildProcess; port: number }> {
   const port = nextPort++;
   const args = ["--port", port.toString(), "--silent"];
   if (hardfork) {
     args.push("--hardfork", hardfork);
   }
+  if (forkUrl) {
+    args.push("--fork-url", forkUrl);
+  }
   const anvil = spawn(ANVIL_BIN, args);
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await new Promise((resolve) => setTimeout(resolve, 1500));
   return { process: anvil, port };
 }
 
@@ -329,7 +332,7 @@ async function handleAnalyze(body: any): Promise<any> {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; detached capability unconsumed at signing)"
+        message: "B₀ verdict SAFE under immediate-delta criterion only (0.00 USDC loss at Step 0; detached capability unconsumed at signing)"
       },
       counterexample,
       prospectiveRisk,
@@ -459,7 +462,7 @@ async function handleAnalyze(body: any): Promise<any> {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; signature transfer unexecuted at signing)"
+        message: "B₀ verdict SAFE under immediate-delta criterion only (0.00 USDC loss at Step 0; signature transfer unexecuted at signing)"
       },
       counterexample,
       prospectiveRisk,
@@ -645,7 +648,7 @@ async function handleAnalyze(body: any): Promise<any> {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; detached capability unconsumed at signing)"
+        message: "B₀ verdict SAFE under immediate-delta criterion only (0.00 USDC loss at Step 0; detached capability unconsumed at signing)"
       },
       counterexample,
       prospectiveRisk,
@@ -807,11 +810,11 @@ async function handleReplay(body: any): Promise<any> {
     sessions.delete(runId);
     return {
       runId,
-      mitigated: true,
+      mitigated: null,
       failedStep: 0,
       revertError: "",
       finalVictimBalance: `${formatUnits(initialBalance, 6)} USDC`,
-      message: "No attack trace was viable; state s_R is safe."
+      message: "No modeled loss path found within bound; no exploit trace to replay against state s_R."
     };
   }
 
@@ -965,12 +968,33 @@ async function handleAnalyzeCapability(body: any): Promise<any> {
 
   // 2. Spawn ephemeral Anvil instance for dynamic reachability analysis
   const is7702 = capability.kind === "EIP7702";
-  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined);
+  const forkUrl = body.forkUrl || body.rpcUrl;
+  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
   const rpcUrl = `http://127.0.0.1:${anvilPort}`;
   const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
   const attacker = attackerAddress ? getAddress(attackerAddress) : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
   try {
+    // Validate target contract availability on reconstructed state
+    const targetContract: Address | null =
+      capability.kind === "EIP7702"
+        ? capability.delegateAddress
+        : (capability as any).permit2Address ?? null;
+
+    if (targetContract && targetContract !== "0x0000000000000000000000000000000000000000") {
+      const targetCode = await publicClient.getBytecode({ address: targetContract });
+      if (!targetCode || targetCode === "0x") {
+        return {
+          status: "STATE_UNAVAILABLE",
+          valid: true,
+          signer: validation.signer,
+          reason: `Target contract at ${targetContract} is not deployed on ephemeral EVM state and no forkUrl was provided. Set state source via 'forkUrl' parameter to reconstruct on-chain storage/bytecode.`,
+          counterexample: null,
+          prospectiveRisk: null
+        };
+      }
+    }
+
     const explorer = new ReachabilityExplorer(
       publicClient,
       { request: async (args: any) => publicClient.request(args) },

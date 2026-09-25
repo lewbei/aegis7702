@@ -90,18 +90,20 @@ This document contains precise, technically defensible answers to the seven most
 
 ### Q7: Why do you need tree search with EVM snapshot rollback? Why isn't a state-aware forward simulator ($B_1$) enough?
 
-> **Short Answer:** A greedy forward simulator ($B_1$) is indeed sufficient on monotonic, single-path sweep contracts (where it is faster with zero snapshot overhead). Tree search with EVM snapshot rollback is strictly necessary when delegates expose **reverting decoys or multi-branch entrypoints**, and full re-search from $s_R$ is strictly necessary to avoid the **false sense of safety created by single-trace replay**.
+> **Short Answer:** A greedy forward simulator ($B_1$) is indeed sufficient on monotonic, single-path sweep contracts (where it is faster with zero snapshot overhead). EVM tree search with snapshot rollback provides **robustness against branch-order ambiguity and reverting decoys**, and bounded post-recovery re-search on state $s_R$ addresses **residual multi-capability risk that single-trace replay cannot detect**.
 
 #### Detailed Defense:
 - **Where $B_1$ Suffices (Honest Concession):**
-  - If a capability has a single, monotonic exploit path (such as the 51 single-drain delegate contracts in the USENIX '26 corpus), a state-aware forward simulator that relays authorizations and calls the drain function finds the exploit identically (2 states, 2 EVM calls, 0 snapshots).
-  - $B_1$ incurs zero snapshot rollback overhead and runs slightly faster. We do **not** claim tree search is superior on simple linear topologies.
-- **Where Tree Search & Backtracking are Indispensable:**
-  - In adversarial contracts featuring multiple entrypoints where reverting decoys precede the drain (e.g. `forcedRevert()` before `evacuateAsset()`, tested in Fixture 3), $B_1$ executes the first candidate, reverts on-chain, and halts without exploring alternative branches (resulting in a **False Negative**).
-  - Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to catch the revert, restore state, and explore subsequent branches, discovering the drain (**True Positive**).
-- **Why Single-Trace Replay Fails for Recovery Certification:**
-  - Standard industry practice tests exploit mitigation by replaying the old exploit trace $\pi^*$.
-  - In accounts exposed to multiple capabilities (e.g. delegated EIP-7702 + unrevoked Permit2 allowance, tested in Fixture 4), replaying the EIP-7702 trace after delegation clearance reverts, causing $B_1$ to falsely certify the account as `SAFE` (False Sense of Safety).
-  - Aegis CRV initiates a fresh bounded reachability search from $s_R$ across all candidate capability families, discovering the unrevoked Permit2 drain and flagging incomplete recovery.
+  - If a capability has a single, monotonic exploit path (such as the 51 executable-loss cases in our standardized USENIX '26 reconstruction), a state-aware forward simulator that relays authorizations and calls the drain function finds the exploit identically (2 states, 2 EVM calls, 0 snapshots).
+  - $B_1$ incurs zero snapshot rollback overhead and runs slightly faster on local Anvil (e.g. ~60-70 ms vs ~75-85 ms). We do **not** claim tree search is superior on simple linear topologies.
+- **Where Tree Search & Backtracking Provide Structural Robustness (Stress Test):**
+  - A first-action greedy policy is branch-order sensitive: when an adversarial contract presents multiple entrypoints where reverting decoys precede the drain (e.g. `forcedRevert()` before `evacuateAsset()`, tested in Fixture 3), the greedy policy halts on the first reverting call with `REVERT_ERROR`.
+  - Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to catch the revert, restore state, and explore alternative candidate branches, surviving branch-order ambiguity to locate the drain (**True Positive**).
+- **Why Single-Trace Replay Differs from State Re-Verification:**
+  - A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety.
+  - In accounts exposed to multiple capabilities (e.g. delegated EIP-7702 + unrevoked Permit2 allowance, tested in Fixture 4), replaying the EIP-7702 trace after delegation clearance reverts (`TRACE_BLOCKED`). This correctly proves the specific exploit was mitigated, but leaves residual attack surfaces unverified.
+  - Re-searching known candidate capabilities on state $s_R$ uncovers the unrevoked Permit2 drain and flags incomplete recovery:
+    $$\boxed{\text{Trace-Specific Mitigation Verification} \neq \text{Post-Recovery State Re-Verification}}$$
+
 
 

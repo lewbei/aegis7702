@@ -1,5 +1,5 @@
 import { encodeFunctionData, PublicClient } from "viem";
-import { Action, Permit2SignatureCapability } from "../capability/types.js";
+import { Action, ActionEnumeration, Permit2SignatureCapability } from "../capability/types.js";
 import { PERMIT2_ABI, ERC20_ABI } from "../capability/abis.js";
 
 export class Permit2SignatureSemantics {
@@ -7,10 +7,10 @@ export class Permit2SignatureSemantics {
     capability: Permit2SignatureCapability,
     client: PublicClient,
     attacker: `0x${string}`
-  ): Promise<Action[]> {
+  ): Promise<ActionEnumeration> {
     // Only the authorized spender can execute the resulting transfer
     if (attacker.toLowerCase() !== capability.spender.toLowerCase()) {
-      return [];
+      return { status: "MODELED", actions: [] };
     }
 
     const actions: Action[] = [];
@@ -94,6 +94,9 @@ export class Permit2SignatureSemantics {
       }
     }
 
-    return actions;
+    return {
+      status: "MODELED",
+      actions
+    };
   }
 }

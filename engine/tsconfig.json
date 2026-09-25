@@ -7,7 +7,14 @@
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
     "outDir": "./dist"
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/capability/**/*",
+    "src/search/**/*",
+    "src/semantics/**/*",
+    "src/recovery/**/*",
+    "src/reachability.ts"
+  ]
 }

@@ -50,6 +50,10 @@ jobs:
         working-directory: engine
         run: npm ci
 
+      - name: Run TypeScript Typecheck
+        working-directory: engine
+        run: npm run typecheck
+
       - name: Run Engine Kill Tests
         working-directory: engine
         run: npm test

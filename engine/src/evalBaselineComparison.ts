@@ -198,12 +198,12 @@ export class StateAwareGreedyRunner {
     };
   }
 
-  // Standard industry recovery verification: Single-Trace Replay
+  // Single-Trace Replay Verifier: Replays the specific historical exploit trace against post-recovery state s_R
   async replayTrace(
     trace: Action[],
     initialContext: any,
     capability: Capability
-  ): Promise<{ status: "SAFE" | "UNSAFE"; error?: string }> {
+  ): Promise<{ status: "TRACE_BLOCKED" | "TRACE_EXPLOIT_SUCCEEDED"; error?: string }> {
     try {
       for (const action of trace) {
         this.evmCalls++;
@@ -211,11 +211,11 @@ export class StateAwareGreedyRunner {
       }
       const violation = await this.invariantOracle.evaluate(initialContext, capability, this.publicClient);
       if (violation && violation.lossAmount > 0n) {
-        return { status: "UNSAFE" };
+        return { status: "TRACE_EXPLOIT_SUCCEEDED" };
       }
-      return { status: "SAFE" };
+      return { status: "TRACE_BLOCKED" };
     } catch (err: any) {
-      return { status: "SAFE", error: err.message || String(err) };
+      return { status: "TRACE_BLOCKED", error: err.message || String(err) };
     }
   }
 
@@ -682,22 +682,22 @@ async function main() {
     const aegisResF3 = await runInstrumentedAegis(f3Cap, attacker, branchingActionProvider);
     await publicClient.request({ method: "evm_revert", params: [f3SnapAegis] } as any);
 
-    console.log(`  B1 Outcome:    ${b1ResF3.status} (Halted at decoy revert; no rollback -> FALSE NEGATIVE)`);
-    console.log(`  Aegis Outcome: ${aegisResF3.status} (Snapshots: ${aegisResF3.snapshotCount}, Backtracks: ${aegisResF3.revertCount}, Discovered Drain -> TRUE POSITIVE)`);
+    console.log(`  B1 Outcome:    ${b1ResF3.status} (First-action greedy execution halted at decoy revert)`);
+    console.log(`  Aegis Outcome: ${aegisResF3.status} (Snapshot rollback & backtracking survived decoy branch order -> TRUE POSITIVE)`);
 
     summaryTable.push({
-      fixture: "3. Adversarial Branching Decoys",
-      system: "B1 (Greedy Forward)",
+      fixture: "3. Branching Decoys (Policy Stress Test)",
+      system: "B1 (Greedy Forward Policy)",
       outcome: b1ResF3.status,
       visitedStates: b1ResF3.visitedStates,
       evmCalls: b1ResF3.evmCalls,
       snapshots: b1ResF3.snapshotCount,
       backtracks: b1ResF3.revertCount,
       timeMs: b1ResF3.elapsedMs,
-      verdict: "FAIL: False Negative (Halted on Revert Decoy)"
+      verdict: "Halted on Revert Decoy (Order Sensitive)"
     });
     summaryTable.push({
-      fixture: "3. Adversarial Branching Decoys",
+      fixture: "3. Branching Decoys (Policy Stress Test)",
       system: "Aegis CRV (Tree Search)",
       outcome: aegisResF3.status,
       visitedStates: aegisResF3.visitedStates,
@@ -705,7 +705,7 @@ async function main() {
       snapshots: aegisResF3.snapshotCount,
       backtracks: aegisResF3.revertCount,
       timeMs: aegisResF3.elapsedMs,
-      verdict: "PASS: True Positive (Backtracked to Drain)"
+      verdict: "PASS: Backtracked past Decoys to Drain"
     });
 
     // -------------------------------------------------------------------------
@@ -792,20 +792,18 @@ async function main() {
     );
     const b1ReplayTime = Date.now() - b1ReplayStart;
 
-    console.log(`  B1 Replay Verification:`);
-    console.log(`    Status: ${b1Replay.status} (Trace reverted because delegation was cleared)`);
-    console.log(`    VERDICT: B1 falsely certifies account as "SAFE" (Blind to unrevoked Permit2 allowance!)`);
+    console.log(`  B1 Single-Trace Replay Verification:`);
+    console.log(`    Status: ${b1Replay.status} (Exploit trace pi_7702 blocked on state s_R; makes NO claim on overall account safety)`);
+    console.log(`    VERDICT: Single-trace verification certifies mitigation of pi_7702 only (trace mitigation != state verification)`);
 
-    // Aegis CRV Post-Recovery Verification: Bounded Re-Search from state s_R
-    // Aegis explores the account's candidate capabilities on s_R.
-    // Re-searching Permit2 capability from s_R:
+    // Aegis CRV Post-Recovery Verification: Bounded Re-Search of known candidate Permit2 capability from state s_R
     const aegisReSearchStart = Date.now();
     const aegisReSearch = await runInstrumentedAegis(f2Cap, attacker);
     const aegisReSearchTime = Date.now() - aegisReSearchStart;
 
-    console.log(`  Aegis Post-Recovery Re-Search:`);
-    console.log(`    Status: ${aegisReSearch.status} (Discovered unrevoked Permit2 allowance draining ${aegisReSearch.lossFound ? formatUnits(aegisReSearch.lossFound, 6) : 0} USDC)`);
-    console.log(`    VERDICT: Aegis detects incomplete recovery and flags residual loss on state s_R.`);
+    console.log(`  Aegis Re-Search on Known Permit2 Capability from s_R:`);
+    console.log(`    Status: ${aegisReSearch.status} (Discovered residual Permit2 allowance draining ${aegisReSearch.lossFound ? formatUnits(aegisReSearch.lossFound, 6) : 0} USDC)`);
+    console.log(`    VERDICT: Aegis re-search on state s_R uncovers unrevoked Permit2 capability.`);
 
     summaryTable.push({
       fixture: "4. Post-Recovery Residual Risk",
@@ -816,18 +814,18 @@ async function main() {
       snapshots: 0,
       backtracks: 0,
       timeMs: b1ReplayTime,
-      verdict: "FAIL: False Sense of Safety (Missed Permit2 Risk)"
+      verdict: "Trace Blocked (Makes No Account-Level Claim)"
     });
     summaryTable.push({
       fixture: "4. Post-Recovery Residual Risk",
-      system: "Aegis CRV (Full Re-Search from s_R)",
+      system: "Aegis CRV (Re-Search Known Permit2 Cap from s_R)",
       outcome: aegisReSearch.status,
       visitedStates: aegisReSearch.visitedStates,
       evmCalls: aegisReSearch.evmCalls,
       snapshots: aegisReSearch.snapshotCount,
       backtracks: aegisReSearch.revertCount,
       timeMs: aegisReSearchTime,
-      verdict: "PASS: True Safety (Detected Residual Permit2 Drain)"
+      verdict: "PASS: Detected Residual Loss on Permit2 Cap"
     });
 
     // -------------------------------------------------------------------------
@@ -842,12 +840,12 @@ async function main() {
     console.log("  1. Fixtures 1 & 2 (Canonical Linear Chains): B1 and Aegis CRV achieve identical");
     console.log("     exploit detection. B1 is faster with zero snapshot overhead. Tree search is");
     console.log("     not required when the capability has a single, monotonic, non-branching drain.");
-    console.log("  2. Fixture 3 (Branching Decoys & Reverting Entrypoints): B1 halts with a false");
-    console.log("     negative upon hitting a reverting decoy. Aegis CRV's EVM snapshot rollback");
-    console.log("     and DFS backtracking successfully navigates around decoys to find the drain.");
-    console.log("  3. Fixture 4 (Post-Recovery Certification): Single-trace replay (B1) delivers");
-    console.log("     a false sense of safety when partial recovery leaves secondary attack surfaces.");
-    console.log("     Aegis CRV's bounded re-search on s_R guarantees full cross-capability security.\n");
+    console.log("  2. Fixture 3 (Branching Decoys / Policy Stress Test): First-action greedy execution");
+    console.log("     halts on the first reverting candidate branch. Aegis CRV's EVM snapshot rollback");
+    console.log("     and DFS backtracking survives candidate branch ordering to locate the drain.");
+    console.log("  3. Fixture 4 (Post-Recovery Verification): Single-trace replay proves only that the");
+    console.log("     historical trace is blocked (TRACE_BLOCKED). Re-searching known candidate capabilities");
+    console.log("     on state s_R uncovers residual multi-capability exposure (trace mitigation != state verification).\n");
 
     console.log("All 4 controlled comparison fixtures executed successfully.");
   } finally {

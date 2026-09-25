@@ -1,5 +1,5 @@
 import { encodeFunctionData, PublicClient } from "viem";
-import { Action, Permit2AllowanceCapability } from "../capability/types.js";
+import { Action, ActionEnumeration, Permit2AllowanceCapability } from "../capability/types.js";
 import { PERMIT2_ABI, ERC20_ABI } from "../capability/abis.js";
 
 export class Permit2AllowanceSemantics {
@@ -7,10 +7,10 @@ export class Permit2AllowanceSemantics {
     capability: Permit2AllowanceCapability,
     client: PublicClient,
     attacker: `0x${string}`
-  ): Promise<Action[]> {
+  ): Promise<ActionEnumeration> {
     // Only the authorized spender can execute the resulting allowance
     if (attacker.toLowerCase() !== capability.spender.toLowerCase()) {
-      return [];
+      return { status: "MODELED", actions: [] };
     }
 
     const actions: Action[] = [];
@@ -106,6 +106,9 @@ export class Permit2AllowanceSemantics {
       }
     }
 
-    return actions;
+    return {
+      status: "MODELED",
+      actions
+    };
   }
 }

@@ -20,6 +20,10 @@ import { decodePermit2Allowance } from "./capability/decodePermit2Allowance.js";
 import { PERMIT2_ABI, ERC20_ABI } from "./capability/abis.js";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ANVIL_PORT = 8546;
 const RPC_URL = `http://127.0.0.1:${ANVIL_PORT}`;

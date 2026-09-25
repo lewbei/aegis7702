@@ -144,21 +144,23 @@ To rigorously isolate the contribution of **bounded tree search with EVM backtra
 
 Executed live via `make test-comparison` (`npm run eval:comparison`):
 
-| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Latency | Verdict / Architectural Finding |
+| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Local Anvil Latency* | Verdict / Architectural Finding |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 58 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 64 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
-| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 41 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 42 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
-| **3. Adversarial Branching Decoys** | B₁ (Greedy Forward) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | 36 ms | **FAIL (False Negative):** Halted on reverting decoy; cannot roll back state to reach drain |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | 113 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover `evacuateAsset` |
-| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `SAFE` | 1 | 1 | 0 | 0 | 13 ms | **FAIL (False Sense of Safety):** Replayed trace $\pi_{7702}$ reverts; blind to active Permit2 allowance |
-| | Aegis CRV (Full Re-Search from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 17 ms | **PASS (True Defense):** Bounded re-search on $s_R$ flags residual Permit2 vulnerability |
+| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~66 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~79 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
+| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~60 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
+| **3. Branching Decoys (Policy Stress Test)** | B₁ (Greedy Forward Policy) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | ~42 ms | **Halted on Revert Decoy:** First-action greedy execution halted on reverting branch |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | ~171 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover drain |
+| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `TRACE_BLOCKED` | 1 | 1 | 0 | 0 | ~20 ms | **Trace Blocked:** Exploit trace $\pi_{7702}$ blocked; makes no claim on overall account safety |
+| | Aegis CRV (Re-Search Known Permit2 Cap from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **PASS (True Defense):** Re-search on state $s_R$ flags residual Permit2 vulnerability |
+
+*\*Latencies represent single-run measurements on local Anvil nodes and illustrate relative overhead rather than statistical microbenchmarks.*
 
 ### Scientific Takeaways & Honest Concessions
-1. **Concession on Linear Chains:** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 single-drain contracts in the USENIX '26 corpus), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. We explicitly do **not** claim tree search is superior on simple linear topologies.
-2. **Necessity of Backtracking on Branching Topologies:** When delegates expose multi-function entrypoints where decoy or reverting branches precede the drain (Fixture 3), $B_1$ crashes/halts on the revert, emitting a False Negative. Aegis CRV's EVM snapshot rollback is strictly required to navigate complex contract surfaces.
-3. **Danger of Single-Trace Replay:** Standard industry practice verifies exploit fixes by replaying the discovered exploit trace $\pi^*$. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay falsely certifies the account as "SAFE". Aegis CRV's bounded re-search from $s_R$ guarantees true cross-capability security certification.
+1. **Concession on Linear Chains:** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 executable-loss cases in our standardized USENIX '26 reconstruction), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. We explicitly do **not** claim tree search is superior on simple linear topologies.
+2. **Robustness to Branch-Order Ambiguity (Policy Stress Test):** A first-action greedy execution policy is branch-order sensitive: when an adversarial contract presents multiple entrypoints where decoy or reverting branches precede the drain (Fixture 3), the greedy policy halts on the first revert with `REVERT_ERROR`. Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to recover from reverting branches and continue exploration, making it robust against candidate ordering.
+3. **Trace-Specific Mitigation $\neq$ State Re-Verification:** A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay confirms the EIP-7702 exploit was blocked. Re-searching the account's candidate capabilities on state $s_R$ uncovers the unrevoked Permit2 drain and flags incomplete recovery.
 
 ---
 

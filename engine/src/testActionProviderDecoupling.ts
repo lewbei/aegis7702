@@ -8,6 +8,7 @@ import {
   Address,
   formatUnits
 } from "viem";
+import { foundry } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { signAuthorization } from "viem/experimental";
 import { spawn, ChildProcess } from "child_process";
@@ -17,7 +18,7 @@ import {
   LossOracle,
   LossObservation
 } from "./search/explorer.js";
-import { Action, Capability, EIP7702Capability } from "./capability/types.js";
+import { Action, ActionEnumeration, Capability, EIP7702Capability } from "./capability/types.js";
 import { decode7702 } from "./capability/decode7702.js";
 import { ERC20_ABI } from "./capability/abis.js";
 import * as fs from "fs";
@@ -87,9 +88,9 @@ async function runDecouplingTest() {
   const anvil = await startAnvil();
 
   try {
-    const publicClient = createPublicClient({ transport: http(RPC_URL) });
-    const victimWallet = createWalletClient({ account: victimAccount, transport: http(RPC_URL) });
-    const attackerWallet = createWalletClient({ account: attackerAccount, transport: http(RPC_URL) });
+    const publicClient = createPublicClient({ chain: foundry, transport: http(RPC_URL) });
+    const victimWallet = createWalletClient({ account: victimAccount, chain: foundry, transport: http(RPC_URL) });
+    const attackerWallet = createWalletClient({ account: attackerAccount, chain: foundry, transport: http(RPC_URL) });
 
     // Deploy MockUSDC & PluginOnlyDelegate (which exposes NOVEL unmodeled selectors)
     console.log("[2/6] Deploying MockUSDC & novel PluginOnlyDelegate contract...");

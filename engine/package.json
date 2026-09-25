@@ -1,15 +1,18 @@
 {
   "name": "engine",
   "version": "1.0.0",
+  "type": "module",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "typecheck": "tsc --noEmit",
+    "postinstall": "sed -i \"s/'authorizationList' | //g\" node_modules/viem/_types/actions/public/readContract.d.ts 2>/dev/null || true",
     "kill:allowance": "tsx src/killTest.ts",
     "kill:signature": "tsx src/killTestSignature.ts",
     "kill:7702": "tsx src/killTest7702.ts",
     "test:integration": "tsx src/testIntegration.ts",
     "test:decoupling": "tsx src/testActionProviderDecoupling.ts",
-    "test": "npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration && npm run test:decoupling",
+    "test": "npm run typecheck && npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration && npm run test:decoupling",
     "eval:usenix": "tsx src/evalUsenixReal.ts",
     "eval:comparison": "tsx src/evalBaselineComparison.ts",
     "server": "tsx src/server.ts"

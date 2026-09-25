@@ -83,13 +83,11 @@ export class BuiltinCapabilityActionProvider implements ActionProvider {
     attacker: `0x${string}`
   ): Promise<ActionEnumeration> {
     if (capability.kind === "PERMIT2_ALLOWANCE") {
-      const actions = await Permit2AllowanceSemantics.enumerateActions(capability, publicClient, attacker);
-      return { status: "MODELED", actions };
+      return Permit2AllowanceSemantics.enumerateActions(capability, publicClient, attacker);
     }
 
     if (capability.kind === "PERMIT2_SIGNATURE") {
-      const actions = await Permit2SignatureSemantics.enumerateActions(capability, publicClient, attacker);
-      return { status: "MODELED", actions };
+      return Permit2SignatureSemantics.enumerateActions(capability, publicClient, attacker);
     }
 
     if (capability.kind === "EIP7702") {

@@ -10,7 +10,7 @@ export interface Permit2RecoveryTx {
 }
 
 export interface RecoveryAction {
-  strategy: "INVALIDATE_NONCE" | "LOCKDOWN_ALLOWANCE" | "NOOP";
+  strategy: "INVALIDATE_NONCE" | "LOCKDOWN_ALLOWANCE" | "NOOP" | "RECOVERY_INFEASIBLE";
   description: string;
   target: Address;
   calldata: Hex;
@@ -41,6 +41,20 @@ export class Permit2RecoveryPlanner {
       const targetNonce = capability.details.nonce + 1;
       const MAX_DELTA = 65535; // type(uint16).max limit in Permit2 AllowanceTransfer.sol
       const delta = targetNonce - currentNonce;
+
+      // Bound future-nonce recovery chunks to prevent unbounded memory/execution overhead
+      const MAX_CHUNKS = 100;
+      const estimatedChunks = Math.ceil(delta / MAX_DELTA);
+      if (estimatedChunks > MAX_CHUNKS) {
+        return {
+          strategy: "RECOVERY_INFEASIBLE",
+          description: `Permit2 recovery requires ${estimatedChunks} chunked invalidation transactions (exceeding maximum feasible batch threshold of ${MAX_CHUNKS}). Manual intervention or token contract revocation required.`,
+          target: permit2,
+          calldata: "0x",
+          actor: owner,
+          totalChunks: estimatedChunks
+        };
+      }
 
       const txs: Permit2RecoveryTx[] = [];
       let stepNonce = currentNonce;

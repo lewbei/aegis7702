@@ -4,9 +4,9 @@
 **Project Name:** Aegis7702  
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
-**Release Tag:** [`hackathon-final-v1.0.0`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.0)  
-**Latest Verified Release CI Run:** [GitHub Actions Run #35972326804](https://github.com/lewbei/aegis7702/actions/runs/35972326804) (4/4 jobs green)  
-**Reference Benchmark CI Run:** [GitHub Actions Run #35964170153](https://github.com/lewbei/aegis7702/actions/runs/35964170153)  
+**Release Tag:** [`hackathon-final-v1.0.3`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.3)  
+**Latest Verified Release CI Run:** [GitHub Actions Run #36086398781](https://github.com/lewbei/aegis7702/actions/runs/36086398781) (4/4 jobs green)  
+**Reference Benchmark CI Run:** [GitHub Actions Run #36086398781](https://github.com/lewbei/aegis7702/actions/runs/36086398781)  
 
 ---
 
@@ -16,10 +16,10 @@ The complete verification pipeline was executed end-to-end on GitHub Actions CI 
 
 | CI Job Name | Status | Duration | Scope |
 |---|:---:|:---:|---|
-| **Foundry Solidity Tests** | ✅ `success` | 25s | 14/14 security tests passing across 4 suites |
-| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 5m 46s | 3 kill tests + 5 adversarial recovery scenarios |
-| **React Frontend Build** | ✅ `success` | 18s | Clean Vite 8 + React 19 production build (`0` errors) |
-| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 29m 49s | Full Prague-EVM execution across all 58 artifact bytecodes |
+| **Foundry Solidity Tests** | ✅ `success` | 27s | 14/14 security tests passing across 4 suites |
+| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 6m 29s | Typecheck + 3 kill tests + 5 adversarial recovery scenarios |
+| **React Frontend Build** | ✅ `success` | 15s | Clean Vite 8 + React 19 production build (`0` errors) |
+| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 29m 40s | Full Prague-EVM execution across all 58 artifact bytecodes |
 
 ---
 
@@ -41,7 +41,7 @@ The complete verification pipeline was executed end-to-end on GitHub Actions CI 
 | **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Baseline missed all 51 executable loss cases ($\Delta = \$0.00$) |
 | **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% concrete loss reproducibility on fresh snapshots |
 | **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L(s_R) = 0$) |
-| **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | Zero false alarms across 4 negative controls |
+| **Controlled Protocol-Negative Verification** | **4 / 4 (0 false alarms)** | Zero false alarms across 4 negative controls |
 
 Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md).
 
@@ -51,16 +51,18 @@ Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testda
 
 Executed live via `make test-comparison` (`cd engine && npm run eval:comparison`):
 
-| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Latency | Verdict / Architectural Finding |
+| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Local Anvil Latency* | Verdict / Architectural Finding |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 58 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 64 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
-| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 41 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 42 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
-| **3. Adversarial Branching Decoys** | B₁ (Greedy Forward) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | 36 ms | **FAIL (False Negative):** Halted on reverting decoy; cannot roll back state to reach drain |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | 113 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover `evacuateAsset` |
-| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `SAFE` | 1 | 1 | 0 | 0 | 13 ms | **FAIL (False Sense of Safety):** Replayed trace $\pi_{7702}$ reverts; blind to active Permit2 allowance |
-| | Aegis CRV (Full Re-Search from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 17 ms | **PASS (True Defense):** Bounded re-search on $s_R$ flags residual Permit2 vulnerability |
+| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~66 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~79 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
+| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~60 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
+| **3. Branching Decoys (Policy Stress Test)** | B₁ (Greedy Forward Policy) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | ~42 ms | **Halted on Revert Decoy:** First-action greedy execution halted on reverting branch |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | ~171 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover drain |
+| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `TRACE_BLOCKED` | 1 | 1 | 0 | 0 | ~20 ms | **Trace Blocked:** Exploit trace $\pi_{7702}$ blocked; makes no claim on overall account safety |
+| | Aegis CRV (Re-Search Known Permit2 Cap from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **PASS (True Defense):** Re-search on state $s_R$ flags residual Permit2 vulnerability |
+
+*\*Latencies represent single-run measurements on local Anvil nodes and illustrate relative overhead rather than statistical microbenchmarks.*
 
 ---
 
