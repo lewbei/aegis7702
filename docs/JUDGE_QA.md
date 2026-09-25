@@ -95,15 +95,18 @@ This document contains precise, technically defensible answers to the seven most
 #### Detailed Defense:
 - **Where $B_1$ Suffices (Empirical Concession on Benchmark A):**
   - In Benchmark A (58 real-world USENIX Security '26 cases), on all 51 vulnerable contracts, $B_1$ and Aegis CRV achieve **identical detection (51/51 `FOUND_LOSS`)**, each taking exactly 2 EVM calls.
-  - Because these real-world contracts feature monotonic, single-path sweep routines, $B_1$ incurs zero snapshot overhead (0 snapshots vs 2 snapshots) and executes faster on local Anvil (63 ms vs 79 ms median latency). We do **not** claim tree search is superior on simple linear topologies.
+  - Symmetrically and independently verified on fresh snapshots: both $B_1$ and Aegis achieve **100% clean-state witness replay (51/51)**, **100% post-recovery neutralization (51/51)**, and **100% exploit trace equivalence ($51/51$)**.
+  - **Empirical Proof via Search Telemetry:** Our search telemetry physically measures candidate action profiles by depth across all 51 cases, revealing strictly $[d_0=1, d_1=1]$ with maximum branching factor $b_{\text{modeled}} = 1$. In this strictly linear topology without decoys or alternative branch choices, tree search and linear forward simulation synthesize identical action traces.
+  - Because these real-world contracts feature monotonic, single-path sweep routines, $B_1$ incurs zero snapshot overhead (0 snapshots vs 2 snapshots) and executes faster on local Anvil (57 ms vs 73 ms median latency). We do **not** claim tree search is superior on simple linear topologies.
 - **Where Tree Search & Backtracking Provide Structural Robustness:**
   - **Handling Reverting Calls:** In Benchmark A's 6 non-vulnerable cases, contracts revert due to unsatisfied preconditions. Linear $B_1$ halts with `REVERT_ERROR` because it cannot backtrack. Aegis CRV catches the revert, rolls back EVM state via `evm_revert`, and safely certifies `NO_MODELED_LOSS`.
   - **Surviving Branch-Order Decoys (Benchmark B / Fixture 3):** A greedy forward policy is branch-order sensitive. When an adversarial contract presents multiple entrypoints where reverting decoys precede the drain (e.g. `decoyRevert -> decoyPing -> evacuateAsset`), $B_1$ halts on the first reverting call with `REVERT_ERROR`. Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to recover from reverting branches and continue exploration, locating the asset drain (**True Positive**).
 - **Why Single-Trace Replay Differs from State Re-Verification (Benchmark B / Fixture 4):**
   - A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety.
   - In accounts exposed to multiple capabilities (e.g. delegated EIP-7702 + unrevoked Permit2 allowance), replaying the EIP-7702 trace after delegation clearance reverts (`TRACE_BLOCKED`). This correctly proves the specific exploit was mitigated, but leaves residual attack surfaces unverified.
-  - Re-searching known candidate capabilities on state $s_R$ uncovers the unrevoked Permit2 drain and flags incomplete recovery:
+  - Aegis CRV provides the `MultiCapabilityAuditor` feature, auditing the account's complete capability portfolio (`CapabilitySet`) across isolated state snapshots $s_R$. While single-trace replay only verifies trace neutralization ($\pi_{7702}$ blocked), `MultiCapabilityAuditor` flags `FOUND_RESIDUAL_LOSS` from residual unrevoked Permit2 allowances:
     $$\boxed{\text{Trace-Specific Mitigation Verification} \neq \text{Post-Recovery State Re-Verification}}$$
+
 
 
 

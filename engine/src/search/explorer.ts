@@ -218,6 +218,14 @@ export interface ExplorerOptions {
   invariantOracle?: InvariantOracle;
 }
 
+export interface SearchTelemetry {
+  candidateCountsByDepth: Record<number, number>;
+  maxBranchingFactor: number;
+  totalGeneratedActions: number;
+  successfulActions: number;
+  revertingActions: number;
+}
+
 export type ExploreResult =
   | {
       status: "FOUND_LOSS";
@@ -234,15 +242,18 @@ export type ExploreResult =
         amount: string;
         formatted: string;
       };
+      telemetry: SearchTelemetry;
     }
   | {
       status: "NO_MODELED_LOSS";
       visitedStates: number;
+      telemetry: SearchTelemetry;
     }
   | {
       status: "UNMODELED";
       reason: string;
       visitedStates: number;
+      telemetry: SearchTelemetry;
     };
 
 /**
@@ -255,6 +266,13 @@ export class ReachabilityExplorer {
   private actionProvider: ActionProvider;
   private invariantOracle: InvariantOracle;
   private visitedStates: number = 0;
+  private telemetry: SearchTelemetry = {
+    candidateCountsByDepth: {},
+    maxBranchingFactor: 0,
+    totalGeneratedActions: 0,
+    successfulActions: 0,
+    revertingActions: 0
+  };
 
   constructor(
     private publicClient: PublicClient,
@@ -279,8 +297,19 @@ export class ReachabilityExplorer {
     attacker: `0x${string}`
   ): Promise<ExploreResult> {
     this.visitedStates = 0;
+    this.telemetry = {
+      candidateCountsByDepth: {},
+      maxBranchingFactor: 0,
+      totalGeneratedActions: 0,
+      successfulActions: 0,
+      revertingActions: 0
+    };
     const initialContext = await this.invariantOracle.snapshotInitial(capability, this.publicClient);
     const searchOutcome = await this.dfs(0, [], initialContext, capability, attacker);
+    const finalTelemetry: SearchTelemetry = {
+      ...this.telemetry,
+      candidateCountsByDepth: { ...this.telemetry.candidateCountsByDepth }
+    };
 
     if (searchOutcome.status === "FOUND_LOSS") {
       const ce = searchOutcome.counterexample;
@@ -293,7 +322,8 @@ export class ReachabilityExplorer {
         attacker: ce.attacker,
         depth: ce.depth,
         trace: ce.trace,
-        loss: ce.loss
+        loss: ce.loss,
+        telemetry: finalTelemetry
       };
     }
 
@@ -301,13 +331,15 @@ export class ReachabilityExplorer {
       return {
         status: "UNMODELED",
         reason: searchOutcome.reason,
-        visitedStates: this.visitedStates
+        visitedStates: this.visitedStates,
+        telemetry: finalTelemetry
       };
     }
 
     return {
       status: "NO_MODELED_LOSS",
-      visitedStates: this.visitedStates
+      visitedStates: this.visitedStates,
+      telemetry: finalTelemetry
     };
   }
 
@@ -337,6 +369,9 @@ export class ReachabilityExplorer {
     }
 
     const actions = enumeration.actions;
+    this.telemetry.candidateCountsByDepth[depth] = (this.telemetry.candidateCountsByDepth[depth] ?? 0) + actions.length;
+    this.telemetry.maxBranchingFactor = Math.max(this.telemetry.maxBranchingFactor, actions.length);
+    this.telemetry.totalGeneratedActions += actions.length;
     console.log(`     [Explorer Depth ${depth}] Discovered ${actions.length} legal action(s): ${actions.map(a => a.id).join(", ")}`);
 
     let unmodeledReason: string | undefined;
@@ -348,6 +383,7 @@ export class ReachabilityExplorer {
       try {
         // 2. Execute candidate action
         await this.executeAction(action);
+        this.telemetry.successfulActions++;
 
         // 3. Inspect state after action execution via injected InvariantOracle
         const violation = await this.invariantOracle.evaluate(
@@ -405,6 +441,7 @@ export class ReachabilityExplorer {
           unmodeledReason = deeperResult.reason;
         }
       } catch (err: any) {
+        this.telemetry.revertingActions++;
         console.log(`       -> Action [${action.id}] reverted: ${err.message || err}`);
         await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
       }

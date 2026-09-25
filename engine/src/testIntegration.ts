@@ -371,6 +371,93 @@ async function runIntegrationTests() {
     }
     console.log(`     ✓ Authenticated capability verified: status=${validData.status}, valid=${validData.valid}, signer=${validData.signer}`);
 
+    // Subtest 7C: SSRF defense rejection for forbidden forkUrl
+    console.log("  -> Subtest 7C: SSRF defense rejection for forbidden forkUrl...");
+    const ssrfRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: validAuth.address,
+          chainId: validAuth.chainId,
+          nonce: validAuth.nonce,
+          yParity: validAuth.yParity,
+          r: validAuth.r,
+          s: validAuth.s
+        },
+        forkUrl: "http://169.254.169.254/latest/meta-data"
+      })
+    });
+    if (ssrfRes.status !== 400) {
+      throw new Error(`Expected HTTP 400 for SSRF target but got ${ssrfRes.status}`);
+    }
+    const ssrfData = await ssrfRes.json();
+    if (!ssrfData.error || !ssrfData.error.includes("SSRF rejected")) {
+      throw new Error(`Expected SSRF error message, got ${JSON.stringify(ssrfData)}`);
+    }
+    console.log(`     ✓ Forbidden cloud metadata SSRF successfully blocked: "${ssrfData.error}"`);
+
+    // Subtest 7D: Wallet-Signable Recovery API (/api/recovery-plan)
+    console.log("  -> Subtest 7D: Wallet-signable recovery plan generation (/api/recovery-plan)...");
+    const planRes = await fetch(`${BASE_URL}/api/recovery-plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: validAuth.address,
+          chainId: validAuth.chainId,
+          nonce: validAuth.nonce,
+          yParity: validAuth.yParity,
+          r: validAuth.r,
+          s: validAuth.s
+        }
+      })
+    });
+    if (!planRes.ok) throw new Error(`POST /api/recovery-plan failed: ${await planRes.text()}`);
+    const planData = await planRes.json();
+    if (!planData.preconditions || !planData.walletTransactions || !Array.isArray(planData.walletTransactions)) {
+      throw new Error(`Invalid recovery-plan response: ${JSON.stringify(planData)}`);
+    }
+    if (planData.preconditions.accountAddress.toLowerCase() !== testAccount.address.toLowerCase()) {
+      throw new Error(`Precondition address mismatch: expected ${testAccount.address}, got ${planData.preconditions.accountAddress}`);
+    }
+    console.log(`     ✓ Wallet-signable recovery plan synthesized: strategy=${planData.strategy}, txs=${planData.walletTransactions.length}, preconditions=${JSON.stringify(planData.preconditions)}`);
+
+    // Subtest 7E: State-Race Precondition Failure Detection
+    console.log("  -> Subtest 7E: State-race precondition failure defense in /api/recover...");
+    const raceSession = await (
+      await fetch(`${BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId: "eip7702" })
+      })
+    ).json();
+
+    const raceRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: raceSession.runId,
+        expectedAccountNonce: 999999 // Intentionally diverged nonce to trigger state-race guard
+      })
+    });
+    const raceRecoverData = await raceRecoverRes.json();
+    if (raceRecoverData.status !== "STATE_PRECONDITION_FAILED") {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED for nonce mismatch, got ${JSON.stringify(raceRecoverData)}`);
+    }
+    console.log(`     ✓ State-race regression defense triggered: status=${raceRecoverData.status}, reason="${raceRecoverData.reason}"`);
+
+    // Clean up raceSession
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: raceSession.runId })
+    });
+
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");
     console.log("================================================================================\n");

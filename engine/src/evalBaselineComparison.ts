@@ -26,9 +26,11 @@ import {
 import {
   Action,
   Capability,
+  CapabilitySet,
   EIP7702Capability,
   Permit2AllowanceCapability
 } from "./capability/types.js";
+import { MultiCapabilityAuditor } from "./capability/multiAuditor.js";
 import { decode7702 } from "./capability/decode7702.js";
 import { decodePermit2Allowance } from "./capability/decodePermit2Allowance.js";
 import { ERC20_ABI, MALICIOUS_DELEGATE_ABI, PERMIT2_ABI } from "./capability/abis.js";
@@ -647,14 +649,21 @@ async function main() {
     console.log(`    Status: ${b1Replay.status} (Exploit trace pi_7702 blocked on state s_R; makes NO claim on overall account safety)`);
     console.log(`    VERDICT: Single-trace verification certifies mitigation of pi_7702 only (trace mitigation != state verification)`);
 
-    // Aegis CRV Post-Recovery Verification: Bounded Re-Search of known candidate Permit2 capability from state s_R
-    const aegisReSearchStart = Date.now();
-    const aegisReSearch = await runInstrumentedAegis(f2Cap, attacker);
-    const aegisReSearchTime = Date.now() - aegisReSearchStart;
+    // Aegis CRV Post-Recovery Verification: MultiCapabilityAuditor evaluates victim's entire capability portfolio from state s_R
+    const victimPortfolio: CapabilitySet = [f1Cap, f2Cap];
+    const multiAuditor = new MultiCapabilityAuditor(publicClient, rpcClient);
+    const multiAuditStart = Date.now();
+    const multiAuditResult = await multiAuditor.audit(victimPortfolio, attacker);
+    const multiAuditTime = Date.now() - multiAuditStart;
 
-    console.log(`  Aegis Re-Search on Known Permit2 Capability from s_R:`);
-    console.log(`    Status: ${aegisReSearch.status} (Discovered residual Permit2 allowance draining ${aegisReSearch.lossFound ? formatUnits(aegisReSearch.lossFound, 6) : 0} USDC)`);
-    console.log(`    VERDICT: Aegis re-search on state s_R uncovers unrevoked Permit2 capability.`);
+    const residualLossFound =
+      multiAuditResult.status === "FOUND_RESIDUAL_LOSS"
+        ? formatUnits(BigInt(multiAuditResult.counterexample.counterexample.loss.amount), 6)
+        : "0.00";
+
+    console.log(`  Aegis MultiCapabilityAuditor Portfolio Evaluation from s_R:`);
+    console.log(`    Status: ${multiAuditResult.status} (Evaluated ${multiAuditResult.evaluatedCount}/${victimPortfolio.length} capabilities, residual loss: ${residualLossFound} USDC)`);
+    console.log(`    VERDICT: MultiCapabilityAuditor on state s_R uncovers unrevoked Permit2 capability in account portfolio.`);
 
     summaryTable.push({
       fixture: "4. Post-Recovery Residual Risk",
@@ -669,14 +678,14 @@ async function main() {
     });
     summaryTable.push({
       fixture: "4. Post-Recovery Residual Risk",
-      system: "Aegis CRV (Re-Search Known Permit2 Cap from s_R)",
-      outcome: aegisReSearch.status,
-      visitedStates: aegisReSearch.visitedStates,
-      evmCalls: aegisReSearch.evmCalls,
-      snapshots: aegisReSearch.snapshotCount,
-      backtracks: aegisReSearch.revertCount,
-      timeMs: aegisReSearchTime,
-      verdict: "PASS: Detected Residual Loss on Permit2 Cap"
+      system: "Aegis CRV (MultiCapabilityAuditor)",
+      outcome: multiAuditResult.status,
+      visitedStates: multiAuditResult.metrics.totalVisitedStates,
+      evmCalls: multiAuditResult.metrics.totalEvmCalls,
+      snapshots: multiAuditResult.metrics.totalSnapshots,
+      backtracks: multiAuditResult.metrics.totalBacktracks,
+      timeMs: multiAuditTime,
+      verdict: "PASS: Portfolio Audit Detected Residual Loss"
     });
 
     // -------------------------------------------------------------------------

@@ -95,6 +95,49 @@ interface ActiveSession {
 const sessions = new Map<string, ActiveSession>();
 let nextPort = 8600;
 
+let activeWorkers = 0;
+const MAX_CONCURRENT_WORKERS = 4;
+const WORKER_TIMEOUT_MS = 30000;
+
+export function validateForkUrl(urlStr: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr);
+  } catch {
+    throw new Error(`Invalid forkUrl format: ${urlStr}`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Invalid forkUrl protocol '${parsed.protocol}'. Only http/https are allowed.`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block localhost / loopback / cloud metadata endpoints
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname === "::1" ||
+    hostname === "metadata.google.internal" ||
+    hostname === "169.254.169.254"
+  ) {
+    throw new Error(`SSRF rejected: forkUrl targeting loopback/metadata endpoint (${hostname}) is forbidden`);
+  }
+
+  // Parse IPv4 octets to block RFC 1918 / link-local / loopback
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [_, o1, o2, o3, o4] = ipv4Match.map(Number);
+    if (o1 === 10) throw new Error(`SSRF rejected: private IPv4 range 10.0.0.0/8 is forbidden`);
+    if (o1 === 127) throw new Error(`SSRF rejected: loopback IPv4 range 127.0.0.0/8 is forbidden`);
+    if (o1 === 169 && o2 === 254) throw new Error(`SSRF rejected: link-local IPv4 range 169.254.0.0/16 is forbidden`);
+    if (o1 === 172 && o2 >= 16 && o2 <= 31) throw new Error(`SSRF rejected: private IPv4 range 172.16.0.0/12 is forbidden`);
+    if (o1 === 192 && o2 === 168) throw new Error(`SSRF rejected: private IPv4 range 192.168.0.0/16 is forbidden`);
+    if (o1 === 0) throw new Error(`SSRF rejected: zero network IPv4 is forbidden`);
+  }
+}
+
 function sendJson(res: http.ServerResponse, statusCode: number, data: any) {
   if (res.headersSent) return;
   try {
@@ -115,6 +158,9 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: any) {
 }
 
 async function startEphemeralAnvil(hardfork?: string, forkUrl?: string): Promise<{ process: ChildProcess; port: number }> {
+  if (forkUrl) {
+    validateForkUrl(forkUrl);
+  }
   const port = nextPort++;
   const args = ["--port", port.toString(), "--silent"];
   if (hardfork) {
@@ -660,13 +706,41 @@ async function handleAnalyze(body: any): Promise<any> {
 }
 
 async function handleRecover(body: any): Promise<any> {
-  const { runId } = body;
+  const { runId, expectedAccountNonce, expectedActiveDelegation } = body;
   const session = sessions.get(runId);
   if (!session) {
     throw new Error(`Session ${runId} not found or expired`);
   }
 
   const { victimWallet, publicClient, recoveryPlan, victim, canonicalId, victimAccount } = session;
+
+  // Precondition Defense against State-Race Regressions
+  if (expectedAccountNonce !== undefined) {
+    const actualNonce = await publicClient.getTransactionCount({ address: victim });
+    if (BigInt(actualNonce) !== BigInt(expectedAccountNonce)) {
+      return {
+        runId,
+        status: "STATE_PRECONDITION_FAILED",
+        reason: `State race detected: on-chain account nonce changed from ${expectedAccountNonce} to ${actualNonce}. Recovery aborted to prevent state regression.`,
+        totalTxsExecuted: 0
+      };
+    }
+  }
+
+  if (expectedActiveDelegation !== undefined) {
+    const actualCode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
+    const currentlyDelegated = Boolean(
+      actualCode.length >= 48 && actualCode.toLowerCase().startsWith("0xef0100")
+    );
+    if (currentlyDelegated !== Boolean(expectedActiveDelegation)) {
+      return {
+        runId,
+        status: "STATE_PRECONDITION_FAILED",
+        reason: `State race detected: on-chain delegation state changed (expected active: ${expectedActiveDelegation}, actual: ${currentlyDelegated}). Recovery aborted to prevent state regression.`,
+        totalTxsExecuted: 0
+      };
+    }
+  }
 
   let txHash: Hex = "0x";
   let totalTxsExecuted = 0;
@@ -929,8 +1003,8 @@ async function handleReplay(body: any): Promise<any> {
   };
 }
 
-async function handleAnalyzeCapability(body: any): Promise<any> {
-  const { type, payload, attackerAddress } = body;
+async function executeAnalyzeCapability(body: any): Promise<any> {
+  const { type, payload, attackerAddress, forkUrl: rawForkUrl, rpcUrl } = body;
   if (!type || !payload) {
     throw new Error("Missing required fields: 'type' and 'payload' must be provided");
   }
@@ -968,14 +1042,27 @@ async function handleAnalyzeCapability(body: any): Promise<any> {
 
   // 2. Spawn ephemeral Anvil instance for dynamic reachability analysis
   const is7702 = capability.kind === "EIP7702";
-  const forkUrl = body.forkUrl || body.rpcUrl;
+  const forkUrl = rawForkUrl || rpcUrl;
   const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
-  const rpcUrl = `http://127.0.0.1:${anvilPort}`;
-  const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
+  const anvilRpcUrl = `http://127.0.0.1:${anvilPort}`;
+  const publicClient = createPublicClient({ transport: viemHttp(anvilRpcUrl) });
   const attacker = attackerAddress ? getAddress(attackerAddress) : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
   try {
-    // Validate target contract availability on reconstructed state
+    // 3. State-Source Validation: Verify state chainId matches capability chainId
+    const stateChainId = await publicClient.getChainId();
+    if (BigInt(stateChainId) !== capability.chainId) {
+      return {
+        status: "STATE_UNAVAILABLE",
+        valid: true,
+        signer: validation.signer,
+        reason: `State chainId mismatch: reconstructed EVM state has chainId ${stateChainId} but capability is signed for chainId ${capability.chainId}. Provide corresponding forkUrl.`,
+        counterexample: null,
+        prospectiveRisk: null
+      };
+    }
+
+    // 4. Validate target contract availability on reconstructed state
     const targetContract: Address | null =
       capability.kind === "EIP7702"
         ? capability.delegateAddress
@@ -988,7 +1075,7 @@ async function handleAnalyzeCapability(body: any): Promise<any> {
           status: "STATE_UNAVAILABLE",
           valid: true,
           signer: validation.signer,
-          reason: `Target contract at ${targetContract} is not deployed on ephemeral EVM state and no forkUrl was provided. Set state source via 'forkUrl' parameter to reconstruct on-chain storage/bytecode.`,
+          reason: `Target contract at ${targetContract} is not deployed on reconstructed EVM state (chainId ${stateChainId}). Provide forkUrl parameter to reconstruct on-chain storage/bytecode.`,
           counterexample: null,
           prospectiveRisk: null
         };
@@ -1057,6 +1144,224 @@ async function handleAnalyzeCapability(body: any): Promise<any> {
   }
 }
 
+async function handleAnalyzeCapability(body: any): Promise<any> {
+  if (activeWorkers >= MAX_CONCURRENT_WORKERS) {
+    throw new Error(
+      `Worker pool saturated: maximum concurrent analysis limit (${MAX_CONCURRENT_WORKERS}) reached. Please retry.`
+    );
+  }
+
+  activeWorkers++;
+  try {
+    return await Promise.race([
+      executeAnalyzeCapability(body),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Analysis timed out after ${WORKER_TIMEOUT_MS / 1000}s`)),
+          WORKER_TIMEOUT_MS
+        )
+      )
+    ]);
+  } finally {
+    activeWorkers--;
+  }
+}
+
+async function handleRecoveryPlan(body: any): Promise<any> {
+  const { runId, type, payload, forkUrl } = body;
+
+  // Case 1: Existing session referenced by runId
+  if (runId) {
+    const session = sessions.get(runId);
+    if (!session) {
+      throw new Error(`Session ${runId} not found or expired`);
+    }
+
+    const { publicClient, victim, capability, recoveryPlan, canonicalId } = session;
+    const currentNonce = await publicClient.getTransactionCount({ address: victim });
+    const currentBytecode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
+    const hasDelegation =
+      currentBytecode.length >= 48 && currentBytecode.toLowerCase().startsWith("0xef0100");
+
+    // Format unsigned wallet transactions for window.ethereum.request
+    const walletTransactions: any[] = [];
+
+    if (
+      canonicalId === "eip7702" ||
+      canonicalId === "eip7702_future_nonce" ||
+      canonicalId === "eip7702_active_delegation"
+    ) {
+      if (recoveryPlan.strategy === "CLEAR_DELEGATION") {
+        walletTransactions.push({
+          from: victim,
+          to: victim,
+          value: "0x0",
+          data: "0x",
+          authorizationList: [
+            {
+              contractAddress: "0x0000000000000000000000000000000000000000",
+              chainId: Number(capability.chainId),
+              nonce: currentNonce + 1
+            }
+          ]
+        });
+      } else if (
+        recoveryPlan.strategy === "ADVANCE_NONCE" ||
+        recoveryPlan.strategy === "FUTURE_NONCE_MULTI_ADVANCE"
+      ) {
+        const txs = recoveryPlan.transactions ?? [{ to: victim, value: 0n, data: "0x" }];
+        for (const tx of txs) {
+          walletTransactions.push({
+            from: victim,
+            to: tx.to ?? victim,
+            value: `0x${(tx.value ?? 0n).toString(16)}`,
+            data: tx.data ?? "0x"
+          });
+        }
+      }
+    } else {
+      // Permit2
+      const txs = recoveryPlan.transactions ?? [
+        { to: recoveryPlan.target, data: recoveryPlan.calldata, value: 0n }
+      ];
+      for (const tx of txs) {
+        walletTransactions.push({
+          from: victim,
+          to: tx.to ?? recoveryPlan.target,
+          value: `0x${(tx.value ?? 0n).toString(16)}`,
+          data: tx.data ?? recoveryPlan.calldata
+        });
+      }
+    }
+
+    return {
+      runId,
+      strategy: recoveryPlan.strategy,
+      description: recoveryPlan.description,
+      preconditions: {
+        accountAddress: victim,
+        expectedAccountNonce: currentNonce,
+        expectedBytecode: currentBytecode,
+        expectedActiveDelegation: hasDelegation,
+        chainId: Number(capability.chainId)
+      },
+      walletTransactions
+    };
+  }
+
+  // Case 2: Arbitrary capability provided
+  if (!type || !payload) {
+    throw new Error("Missing required parameters: provide either 'runId' or 'type' and 'payload'");
+  }
+
+  let capability: Capability;
+  const normType = String(type).toUpperCase().replace(/[-_]/g, "");
+  if (normType === "EIP7702") {
+    capability = decode7702(payload);
+  } else if (normType === "PERMIT2ALLOWANCE") {
+    capability = decodePermit2Allowance(payload);
+  } else if (normType === "PERMIT2SIGNATURE") {
+    capability = decodePermit2Signature(payload);
+  } else {
+    throw new Error(`Unsupported capability type: ${type}`);
+  }
+
+  const validation = await CapabilityValidator.validate(capability);
+  if (!validation.valid) {
+    return {
+      status: "INVALID_CAPABILITY",
+      strategy: "NOOP",
+      description: `Capability validation failed: ${validation.reason}`,
+      preconditions: null,
+      walletTransactions: []
+    };
+  }
+
+  const is7702 = capability.kind === "EIP7702";
+  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(
+    is7702 ? "prague" : undefined,
+    forkUrl
+  );
+  const rpcUrl = `http://127.0.0.1:${anvilPort}`;
+  const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
+
+  try {
+    const owner = capability.owner;
+    const currentNonce = await publicClient.getTransactionCount({ address: owner });
+    const currentBytecode = (await publicClient.getBytecode({ address: owner })) ?? "0x";
+    const hasDelegation =
+      currentBytecode.length >= 48 && currentBytecode.toLowerCase().startsWith("0xef0100");
+
+    let recoveryPlan: any;
+    if (capability.kind === "EIP7702") {
+      recoveryPlan = await EIP7702RecoveryPlanner.plan(capability, publicClient);
+    } else if (capability.kind === "PERMIT2_ALLOWANCE") {
+      recoveryPlan = await Permit2RecoveryPlanner.plan(capability, publicClient);
+    } else {
+      recoveryPlan = await Permit2SignatureRecoveryPlanner.plan(capability, publicClient);
+    }
+
+    const walletTransactions: any[] = [];
+    if (capability.kind === "EIP7702") {
+      if (recoveryPlan.strategy === "CLEAR_DELEGATION") {
+        walletTransactions.push({
+          from: owner,
+          to: owner,
+          value: "0x0",
+          data: "0x",
+          authorizationList: [
+            {
+              contractAddress: "0x0000000000000000000000000000000000000000",
+              chainId: Number(capability.chainId),
+              nonce: currentNonce + 1
+            }
+          ]
+        });
+      } else if (
+        recoveryPlan.strategy === "ADVANCE_NONCE" ||
+        recoveryPlan.strategy === "FUTURE_NONCE_MULTI_ADVANCE"
+      ) {
+        const txs = recoveryPlan.transactions ?? [{ to: owner, value: 0n, data: "0x" }];
+        for (const tx of txs) {
+          walletTransactions.push({
+            from: owner,
+            to: tx.to ?? owner,
+            value: `0x${(tx.value ?? 0n).toString(16)}`,
+            data: tx.data ?? "0x"
+          });
+        }
+      }
+    } else {
+      const txs = recoveryPlan.transactions ?? [
+        { to: recoveryPlan.target, data: recoveryPlan.calldata, value: 0n }
+      ];
+      for (const tx of txs) {
+        walletTransactions.push({
+          from: owner,
+          to: tx.to ?? recoveryPlan.target,
+          value: `0x${(tx.value ?? 0n).toString(16)}`,
+          data: tx.data ?? recoveryPlan.calldata
+        });
+      }
+    }
+
+    return {
+      strategy: recoveryPlan.strategy,
+      description: recoveryPlan.description,
+      preconditions: {
+        accountAddress: owner,
+        expectedAccountNonce: currentNonce,
+        expectedBytecode: currentBytecode,
+        expectedActiveDelegation: hasDelegation,
+        chainId: Number(capability.chainId)
+      },
+      walletTransactions
+    };
+  } finally {
+    anvilProcess.kill();
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -1079,6 +1384,7 @@ const server = http.createServer(async (req, res) => {
     req.method === "POST" &&
     (url === "/api/analyze" ||
       url === "/api/recover" ||
+      url === "/api/recovery-plan" ||
       url === "/api/replay" ||
       url === "/api/analyze-capability")
   ) {
@@ -1092,6 +1398,9 @@ const server = http.createServer(async (req, res) => {
           sendJson(res, 200, result);
         } else if (url === "/api/recover") {
           const result = await handleRecover(body);
+          sendJson(res, 200, result);
+        } else if (url === "/api/recovery-plan") {
+          const result = await handleRecoveryPlan(body);
           sendJson(res, 200, result);
         } else if (url === "/api/replay") {
           const result = await handleReplay(body);
@@ -1107,8 +1416,12 @@ const server = http.createServer(async (req, res) => {
             err.message.startsWith("Invalid scenario") ||
             err.message.startsWith("Missing required") ||
             err.message.startsWith("Unsupported capability") ||
+            err.message.startsWith("SSRF rejected") ||
+            err.message.startsWith("State chainId mismatch") ||
             err.message.includes("Unexpected token"));
-        sendJson(res, isClientErr ? 400 : 500, { error: err.message ?? "Internal server error" });
+        const isRateLimit = err.message && err.message.startsWith("Worker pool saturated");
+        const status = isRateLimit ? 429 : isClientErr ? 400 : 500;
+        sendJson(res, status, { error: err.message ?? "Internal server error" });
       }
     });
     return;

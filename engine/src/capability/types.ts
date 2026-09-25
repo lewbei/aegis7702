@@ -51,6 +51,8 @@ export type Capability =
   | Permit2SignatureCapability
   | EIP7702Capability;
 
+export type CapabilitySet = Capability[];
+
 export interface Action {
   id: string;
   description: string;

@@ -126,8 +126,10 @@ Every contract was deployed via `anvil_setCode` using its actual artifact byteco
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | **1 / 58 (1.7%)** | Identical abstention on non-modeled selector (`0x628ff693`) |
 | **Execution Halted on Revert (`REVERT_ERROR`)** | **6 / 58 (10.3%)** | **0 / 58 (0.0%)** | Linear B₁ halts on revert; Aegis recovers via snapshot rollback |
 | **Structural B₀ Immediate-Delta Comparator** | 51 / 51 ($0.00 delta) | 51 / 51 ($0.00 delta) | B₀ evaluated zero immediate loss at Step 0 for all 51 loss cases |
-| **Clean-State Witness Replay Success** | 51 / 51 (100%) | 51 / 51 (100%) | 100% concrete loss reproducibility on fresh snapshot replay |
-| **Post-Recovery Exploit Neutralization** | 51 / 51 (100%) | 51 / 51 (100%) | 100% of replayed exploits neutralized ($L(s_R) = 0$ via Type-4 recovery) |
+| **Clean-State Witness Replay Success** | **51 / 51 (100%)** | **51 / 51 (100%)** | Independently measured on fresh snapshots for both systems |
+| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | **51 / 51 (100%)** | Independently replayed against state $s_R$; 100% neutralized |
+| **Exploit Trace Equivalence ($Trace_{B_1} \equiv Trace_{\text{Aegis}}$)** | **51 / 51 (100%)** | **51 / 51 (100%)** | 100% identical action sequences and calldata across all 51 cases |
+| **Max Branching Factor ($b_{\text{modeled}}$)** | **1** | **1** | Candidate profile $[1, 1]$ across all 51 cases (proves linear topology) |
 | **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
 
 #### Resource & Latency Comparison on Real USENIX Corpus
@@ -136,7 +138,7 @@ Every contract was deployed via `anvil_setCode` using its actual artifact byteco
 |---|:---:|:---:|:---:|:---:|
 | **EVM Calls (Mean / Median)** | 1.97 / 2 | 1.97 / 2 | 2.00 / 2 | 2.00 / 2 |
 | **EVM Snapshots (Mean / Median)** | **0.00 / 0** | **1.97 / 2** | **0.00 / 0** | **2.00 / 2** |
-| **Runtime ms (Median)** | **63 ms** | **79 ms** | **63 ms** | **79 ms** |
+| **Runtime ms (Median)** | **57 ms** | **73 ms** | **57 ms** | **73 ms** |
 
 Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (full 58-case execution matrix documented in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
 
@@ -148,7 +150,7 @@ To rigorously isolate the contribution of **bounded tree search with EVM backtra
 
 * **$B_0$ (Immediate-Delta Comparator):** Inspects balance delta at $t = 0$. By construction, detached signatures (EIP-7702, Permit2) yield $\Delta = \$0.00$. Defeating $B_0$ only justifies *multi-step execution*, not *tree search*.
 * **$B_1$ (State-Aware Greedy Linear Forward Runner):** Understands EIP-7702 and Permit2, relays Type-4 authorizations when required, but executes candidate actions **greedily and linearly forward without state snapshots (`evm_snapshot` / `evm_revert`)**. Uses single-trace replay for post-recovery verification.
-* **Aegis CRV (`ReachabilityExplorer`):** Bounded tree search ($k \le 3$) with state snapshotting, backtracking across reverting and decoy branches, and full post-recovery bounded re-search from state $s_R$.
+* **Aegis CRV (`ReachabilityExplorer` & `MultiCapabilityAuditor`):** Bounded tree search ($k \le 3$) with state snapshotting, backtracking across reverting and decoy branches, and full post-recovery portfolio auditing from state $s_R$.
 
 #### Empirical Comparison Matrix
 
@@ -156,33 +158,38 @@ Executed live via `make test-comparison` (`npm run eval:comparison`):
 
 | Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Local Anvil Latency* | Verdict / Architectural Finding |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~66 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
-| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~79 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
-| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~60 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
+| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~62 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~89 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
+| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | ~58 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
 | | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
-| **3. Branching Decoys (Policy Stress Test)** | B₁ (Greedy Forward Policy) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | ~42 ms | **Halted on Revert Decoy:** First-action greedy execution halted on reverting branch |
+| **3. Branching Decoys (Policy Stress Test)** | B₁ (Greedy Forward Policy) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | ~43 ms | **Halted on Revert Decoy:** First-action greedy execution halted on reverting branch |
 | | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | ~171 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover drain |
-| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `TRACE_BLOCKED` | 1 | 1 | 0 | 0 | ~20 ms | **Trace Blocked:** Exploit trace $\pi_{7702}$ blocked; makes no claim on overall account safety |
-| | Aegis CRV (Re-Search Known Permit2 Cap from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 2 | ~76 ms | **PASS (True Defense):** Re-search on state $s_R$ flags residual Permit2 vulnerability |
+| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `TRACE_BLOCKED` | 1 | 1 | 0 | 0 | ~23 ms | **Trace Blocked:** Exploit trace $\pi_{7702}$ blocked; makes no claim on overall account safety |
+| | Aegis CRV (`MultiCapabilityAuditor`) | `FOUND_RESIDUAL_LOSS` | 3 | 2 | 2 | 2 | ~109 ms | **PASS (Portfolio Defense):** Evaluates complete account portfolio across isolated snapshots $s_R$; detects unrevoked Permit2 allowance |
 
 *\*Latencies represent single-run measurements on local Anvil nodes and illustrate relative overhead rather than statistical microbenchmarks.*
 
 #### Scientific Takeaways & Honest Concessions
-1. **Concession on Linear Chains:** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 executable-loss cases in our standardized USENIX '26 reconstruction), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. We explicitly do **not** claim tree search is superior on simple linear topologies.
+1. **Concession on Linear Chains ($b_{\text{modeled}} = 1$):** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 executable-loss cases in our standardized USENIX '26 reconstruction), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. Our branching telemetry proves that $b_{\text{modeled}} = 1$ with candidate profiles $[1, 1]$ across all 51 cases. We explicitly do **not** claim tree search is superior on simple linear topologies.
 2. **Robustness to Branch-Order Ambiguity (Policy Stress Test):** A first-action greedy execution policy is branch-order sensitive: when an adversarial contract presents multiple entrypoints where decoy or reverting branches precede the drain (Fixture 3), the greedy policy halts on the first revert with `REVERT_ERROR`. Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to recover from reverting branches and continue exploration, making it robust against candidate ordering.
-3. **Trace-Specific Mitigation $\neq$ State Re-Verification:** A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay confirms the EIP-7702 exploit was blocked. Re-searching the account's candidate capabilities on state $s_R$ uncovers the unrevoked Permit2 drain and flags incomplete recovery.
+3. **Trace-Specific Mitigation $\neq$ State Re-Verification:** A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay confirms the EIP-7702 exploit was blocked. `MultiCapabilityAuditor` re-evaluates the account's complete capability portfolio on isolated state snapshots $s_R$, uncovering the unrevoked Permit2 drain and flagging incomplete recovery:
+   $$\boxed{\text{Trace-Specific Mitigation Verification} \neq \text{Post-Recovery State Re-Verification}}$$
 
 ---
 
 ## Adversarial Recovery & Boundary Hardening
 
-Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying boundary resilience in a standardized local Prague-EVM reconstruction:
+Aegis7702 includes a dedicated suite of adversarial stress tests verifying boundary resilience in a standardized local Prague-EVM reconstruction:
 
 1. **EIP-7702 Future Nonce Attack:** When an attacker tricks a victim into signing an authorization tuple for a future nonce ($n_{\text{current}} = 5, n_{\text{auth}} = 8$), Aegis7702 calculates $\Delta = 4$ and automatically synthesizes 4 sequential self-transactions, advancing the account nonce past the stolen authorization and permanently neutralizing it.
 2. **EIP-7702 Active Delegation Clearance:** When malicious code is already actively installed (`0xef0100...`), Aegis7702 synthesizes a Type-4 transaction with authorization pointing to `address(0)` signed with `currentNonce + 1`, resetting the account bytecode back to a clean EOA (`0x`) and proving on-chain that subsequent attacker calls revert.
 3. **Permit2 Nonce Delta Single-Chunk Boundary ($\Delta = 65,535$):** Successfully executes a maximum single-transaction invalidation on Permit2's `uint48` counter.
 4. **Permit2 Nonce Delta Multi-Chunk Boundary ($\Delta = 65,536$):** Detects delta exceeding Permit2's `ExcessiveInvalidation` threshold and splits the recovery into 2 chunked transactions ($65,535 + 1$), avoiding reverts.
-5. **Fail-Closed API Rejection:** Invalid or malformed scenario payloads return deterministic HTTP 400 Bad Request responses rather than hanging or emitting false safety verdicts.
+5. **SSRF Defense Layer:** Validates user-supplied `forkUrl` endpoints, blocking loopback, private RFC1918 IPv4 CIDRs, link-local, and cloud instance metadata (`169.254.169.254`, `metadata.google.internal`).
+6. **Worker Pool & Concurrency Limiting:** Restricts concurrent on-demand verification jobs to 4 workers with a 30s timeout watchdog.
+7. **Wallet-Signable Recovery Plans (`POST /api/recovery-plan`):** Emits unsigned transaction envelopes formatted for `window.ethereum.request` alongside expected on-chain state preconditions.
+8. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery with HTTP 409 if the on-chain account nonce or active delegation changes before recovery broadcast.
+9. **Fail-Closed API Rejection:** Invalid or malformed scenario payloads return deterministic HTTP 400 Bad Request responses rather than hanging or emitting false safety verdicts.
 
 ---
 

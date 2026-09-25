@@ -9,7 +9,8 @@ import {
   ActionProvider,
   InvariantOracle,
   ERC20LossOracle,
-  BuiltinCapabilityActionProvider
+  BuiltinCapabilityActionProvider,
+  SearchTelemetry
 } from "../search/explorer.js";
 
 export interface AnvilRpcClient {
@@ -26,6 +27,7 @@ export interface BaselineRunMetrics {
   elapsedMs: number;
   lossFound?: bigint;
   trace: Action[];
+  telemetry: SearchTelemetry;
   error?: string;
 }
 
@@ -52,6 +54,13 @@ export class StateAwareGreedyRunner {
     const startTime = Date.now();
     this.visitedStates = 0;
     this.evmCalls = 0;
+    const telemetry: SearchTelemetry = {
+      candidateCountsByDepth: {},
+      maxBranchingFactor: 0,
+      totalGeneratedActions: 0,
+      successfulActions: 0,
+      revertingActions: 0
+    };
     const initialContext = await this.invariantOracle.snapshotInitial(capability, this.publicClient);
 
     const trace: Action[] = [];
@@ -71,9 +80,14 @@ export class StateAwareGreedyRunner {
           revertCount: 0,
           elapsedMs: Date.now() - startTime,
           trace,
+          telemetry,
           error: enumeration.reason
         };
       }
+
+      telemetry.candidateCountsByDepth[currentDepth] = (telemetry.candidateCountsByDepth[currentDepth] ?? 0) + enumeration.actions.length;
+      telemetry.maxBranchingFactor = Math.max(telemetry.maxBranchingFactor, enumeration.actions.length);
+      telemetry.totalGeneratedActions += enumeration.actions.length;
 
       if (enumeration.actions.length === 0) {
         return {
@@ -84,7 +98,8 @@ export class StateAwareGreedyRunner {
           snapshotCount: 0,
           revertCount: 0,
           elapsedMs: Date.now() - startTime,
-          trace
+          trace,
+          telemetry
         };
       }
 
@@ -95,7 +110,9 @@ export class StateAwareGreedyRunner {
 
       try {
         await this.executeAction(action);
+        telemetry.successfulActions++;
       } catch (err: any) {
+        telemetry.revertingActions++;
         // Forward-only linear execution has NO snapshot rollback.
         // If the candidate action reverts, the greedy execution halts immediately.
         return {
@@ -107,6 +124,7 @@ export class StateAwareGreedyRunner {
           revertCount: 0,
           elapsedMs: Date.now() - startTime,
           trace,
+          telemetry,
           error: err.message || String(err)
         };
       }
@@ -123,7 +141,8 @@ export class StateAwareGreedyRunner {
           revertCount: 0,
           elapsedMs: Date.now() - startTime,
           lossFound: violation.lossAmount,
-          trace
+          trace,
+          telemetry
         };
       }
 
@@ -138,7 +157,8 @@ export class StateAwareGreedyRunner {
       snapshotCount: 0,
       revertCount: 0,
       elapsedMs: Date.now() - startTime,
-      trace
+      trace,
+      telemetry
     };
   }
 
