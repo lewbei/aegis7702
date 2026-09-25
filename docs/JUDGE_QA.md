@@ -1,6 +1,6 @@
 # Aegis7702: Judge Q&A & Technical Defense Guide
 
-This document contains precise, technically defensible answers to the five most critical questions or adversarial critiques judges may ask during evaluation.
+This document contains precise, technically defensible answers to the seven most critical questions or adversarial critiques judges may ask during evaluation.
 
 ---
 
@@ -85,4 +85,23 @@ This document contains precise, technically defensible answers to the five most 
   - **Abstention Rate (`UNMODELED`):** $735 / 735$ ($100.0\%$)
 - **Important Distinction:** `UNMODELED` is an explicit **abstention**, not a claim of safety or a true negative ($\text{UNMODELED} \neq \text{TRUE NEGATIVE}$). The system recognizes that it lacks the action semantics to model the contract's dispatcher (which includes obfuscated drainers like `loserSweepETH_...`, generic call forwarders like `executeCall(address,bytes)`, and multi-sigs like Safe).
 - **Defensible Boundary:** Aegis is strong at verifying known capability semantics on live EVM state reconstructions, and currently has zero zero-shot semantic coverage on the USENIX holdout. Generalizing across arbitrary bytecodes requires an automated decompiler layer (e.g. Gigahorse) to synthesize action templates from raw dispatchers, which is our documented post-hackathon roadmap.
+
+---
+
+### Q7: Why do you need tree search with EVM snapshot rollback? Why isn't a state-aware forward simulator ($B_1$) enough?
+
+> **Short Answer:** A greedy forward simulator ($B_1$) is indeed sufficient on monotonic, single-path sweep contracts (where it is faster with zero snapshot overhead). Tree search with EVM snapshot rollback is strictly necessary when delegates expose **reverting decoys or multi-branch entrypoints**, and full re-search from $s_R$ is strictly necessary to avoid the **false sense of safety created by single-trace replay**.
+
+#### Detailed Defense:
+- **Where $B_1$ Suffices (Honest Concession):**
+  - If a capability has a single, monotonic exploit path (such as the 51 single-drain delegate contracts in the USENIX '26 corpus), a state-aware forward simulator that relays authorizations and calls the drain function finds the exploit identically (2 states, 2 EVM calls, 0 snapshots).
+  - $B_1$ incurs zero snapshot rollback overhead and runs slightly faster. We do **not** claim tree search is superior on simple linear topologies.
+- **Where Tree Search & Backtracking are Indispensable:**
+  - In adversarial contracts featuring multiple entrypoints where reverting decoys precede the drain (e.g. `forcedRevert()` before `evacuateAsset()`, tested in Fixture 3), $B_1$ executes the first candidate, reverts on-chain, and halts without exploring alternative branches (resulting in a **False Negative**).
+  - Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to catch the revert, restore state, and explore subsequent branches, discovering the drain (**True Positive**).
+- **Why Single-Trace Replay Fails for Recovery Certification:**
+  - Standard industry practice tests exploit mitigation by replaying the old exploit trace $\pi^*$.
+  - In accounts exposed to multiple capabilities (e.g. delegated EIP-7702 + unrevoked Permit2 allowance, tested in Fixture 4), replaying the EIP-7702 trace after delegation clearance reverts, causing $B_1$ to falsely certify the account as `SAFE` (False Sense of Safety).
+  - Aegis CRV initiates a fresh bounded reachability search from $s_R$ across all candidate capability families, discovering the unrevoked Permit2 drain and flagging incomplete recovery.
+
 
