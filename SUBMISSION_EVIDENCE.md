@@ -5,8 +5,8 @@
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
 **Release Tag:** [`hackathon-final-v1.0.8`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.8)  
-**Latest Verified Release CI Run:** [GitHub Actions Run #36107062564](https://github.com/lewbei/aegis7702/actions/runs/36107062564) (4/4 jobs green)  
-**Reference Benchmark CI Run:** [GitHub Actions Run #36107062564](https://github.com/lewbei/aegis7702/actions/runs/36107062564) (4/4 jobs green)  
+**Latest Verified Release CI Run:** [GitHub Actions Run #36113811960](https://github.com/lewbei/aegis7702/actions/runs/36113811960) (4/4 jobs green)  
+**Reference Benchmark CI Run:** [GitHub Actions Run #36113811960](https://github.com/lewbei/aegis7702/actions/runs/36113811960) (4/4 jobs green)  
 
 ---
 
@@ -17,9 +17,9 @@ The complete verification pipeline was executed end-to-end on GitHub Actions CI 
 | CI Job Name | Status | Duration | Scope |
 |---|:---:|:---:|---|
 | **Foundry Solidity Tests** | ✅ `success` | 25s | 14/14 security tests passing across 4 suites |
-| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 8m 39s | Typecheck + 3 kill tests + 5 adversarial recovery scenarios + decoupling test + multi-auditor |
-| **React Frontend Build** | ✅ `success` | 14s | Clean Vite 8 + React 19 production build (`0` errors) |
-| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 1m 11s | Full Prague-EVM execution across all 58 artifact bytecodes |
+| **TypeScript Reachability Engine Kill Tests** | ✅ `success` | 12m 29s | Typecheck + 3 kill tests + expanded adversarial recovery scenarios + decoupling test + multi-auditor |
+| **React Frontend Build** | ✅ `success` | 16s | Clean Vite 8 + React 19 production build (`0` errors) |
+| **USENIX 58-Case Executable Benchmark** | ✅ `success` | 1m 9s | Full Prague-EVM execution across all 58 artifact bytecodes |
 
 ---
 
