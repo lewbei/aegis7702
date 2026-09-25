@@ -16,7 +16,7 @@ export interface MultiAuditMetrics {
 
 export type MultiAuditResult =
   | {
-      status: "SECURE";
+      status: "PORTFOLIO_NO_MODELED_LOSS";
       evaluatedCount: number;
       metrics: MultiAuditMetrics;
       message: string;
@@ -28,6 +28,14 @@ export type MultiAuditResult =
       counterexample: ExploreResult & { status: "FOUND_LOSS" };
       metrics: MultiAuditMetrics;
       message: string;
+    }
+  | {
+      status: "PORTFOLIO_INCOMPLETE";
+      evaluatedCount: number;
+      unmodeledCapabilities: Capability[];
+      unmodeledReasons: string[];
+      metrics: MultiAuditMetrics;
+      message: string;
     };
 
 /**
@@ -36,6 +44,11 @@ export type MultiAuditResult =
  *
  * Each capability is evaluated within an isolated EVM snapshot to prevent state
  * mutations of one verification from contaminating subsequent evaluations.
+ *
+ * Strict Invariant:
+ *   - Any capability yielding FOUND_LOSS => FOUND_RESIDUAL_LOSS
+ *   - Else any capability yielding UNMODELED => PORTFOLIO_INCOMPLETE (UNMODELED != SAFE)
+ *   - Else (all modeled and explore without loss) => PORTFOLIO_NO_MODELED_LOSS
  */
 export class MultiCapabilityAuditor {
   constructor(
@@ -68,6 +81,8 @@ export class MultiCapabilityAuditor {
     };
 
     let evaluatedCount = 0;
+    const unmodeledCaps: Capability[] = [];
+    const unmodeledReasons: string[] = [];
 
     for (const capability of capabilityPortfolio) {
       evaluatedCount++;
@@ -107,13 +122,36 @@ export class MultiCapabilityAuditor {
             message: `Account portfolio audit discovered reachable residual loss in capability (${capability.kind}) under state s_R`
           };
         }
+
+        if (exploreResult.status === "UNMODELED") {
+          unmodeledCaps.push(capability);
+          unmodeledReasons.push(exploreResult.reason);
+        }
       } finally {
         await this.rpcClient.request({ method: "evm_revert", params: [snap] } as any);
       }
     }
 
+    if (unmodeledCaps.length > 0) {
+      return {
+        status: "PORTFOLIO_INCOMPLETE",
+        evaluatedCount,
+        unmodeledCapabilities: unmodeledCaps,
+        unmodeledReasons,
+        metrics: {
+          totalEvaluated: evaluatedCount,
+          totalVisitedStates: totalVisited,
+          totalEvmCalls: totalCalls,
+          totalSnapshots,
+          totalBacktracks,
+          elapsedMs: Date.now() - startTime
+        },
+        message: `Account portfolio audit incomplete: ${unmodeledCaps.length} capability(ies) have unmodeled action semantics and could not be verified on current state`
+      };
+    }
+
     return {
-      status: "SECURE",
+      status: "PORTFOLIO_NO_MODELED_LOSS",
       evaluatedCount,
       metrics: {
         totalEvaluated: evaluatedCount,
@@ -123,7 +161,7 @@ export class MultiCapabilityAuditor {
         totalBacktracks,
         elapsedMs: Date.now() - startTime
       },
-      message: `Account portfolio audit completed: all ${evaluatedCount} capability(ies) certified secure on current state`
+      message: `Account portfolio audit completed: no modeled loss paths discovered across all ${evaluatedCount} verified capability(ies) on current state`
     };
   }
 }
