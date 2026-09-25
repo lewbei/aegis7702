@@ -31,22 +31,28 @@ Conventional simulation only reveals what a proposed execution does under a part
 
 Instead of outputting ambiguous, probabilistic "AI risk scores", Aegis7702 executes a closed-loop deterministic verification protocol against live EVM state snapshots:
 
-1. **Typed Capability Extraction & Decoding:** Ingests raw wallet signing payloads via dedicated Capability Decoders (`decodePermit2Allowance`, `decodePermit2Signature`, `decode7702`) into structured capabilities $c \in \mathcal{C}$ across three supported domains:
+1. **Typed Capability Extraction & Cryptographic Validation:** Ingests raw wallet signing payloads via dedicated Capability Decoders (`decodePermit2Allowance`, `decodePermit2Signature`, `decode7702`) into structured capabilities $c \in \mathcal{C}$ across three supported domains:
    - EIP-7702 Ephemeral Delegation Tuples
    - Uniswap Permit2 `AllowanceTransfer` (`PermitSingle` / `PermitBatch`)
    - Uniswap Permit2 `SignatureTransfer` (Unordered Nonce Bitmaps)
+   Every payload is validated cryptographically via `CapabilityValidator` (`recoverAuthorizationAddress` and `verifyTypedData`) before reachability search. Forged or mismatched signatures immediately yield `INVALID_CAPABILITY`.
 2. **Bounded Reachability Search ($k \le 3$):** Generates candidate attacker action sequences within modeled semantics $\mathcal{A}_{\text{modeled}}$ and explores downstream EVM state branches:
    $$\text{Unsafe}_{\le k}^{\mathcal A_{\text{modeled}}}(c, s_0) \iff \exists \pi = (a_1, \ldots, a_j), \, j \le k \quad \text{such that} \quad L(s_0, T_\pi(s_0)) > 0$$
    where the loss function evaluates tracked asset deltas:
    $$L(s_0, s') = \sum_{t \in \text{Tracked}} \max(0, \text{Balance}_{t, \text{victim}}(s_0) - \text{Balance}_{t, \text{victim}}(s'))$$
    *(In our MVP, this measures the primary capability-associated ERC-20 token, with multi-asset ETH/ERC-20 aggregate blast radius tracking in our roadmap).*
-3. **Executable Counterexample Witness:** When a loss path is discovered, Aegis7702 does not just alert the user; it returns the exact, reproducible multi-step exploit trace $\pi$ (e.g., `RelayAuthorization` $\to$ `MaliciousDelegate.sweep`).
+3. **Strict 5-State Verification Domain & Executable Counterexamples:** Reachability exploration returns one of five strict, deterministic outcomes:
+   $$\boxed{\text{FOUND\_LOSS} \mid \text{NO\_MODELED\_LOSS} \mid \text{UNMODELED} \mid \text{CONDITIONAL\_RISK} \mid \text{INVALID\_CAPABILITY}}$$
+   **No Fabricated Counterexamples:** A physical `counterexample` is returned if and only if $L(s_0, s') > 0$ is actually executed and witnessed on the EVM state. In dormant conditions (such as future nonces $n_{\text{auth}} > n_{\text{onchain}}$), the engine strictly abstains from returning a fake counterexample, emitting `CONDITIONAL_RISK` alongside prospective risk projections (`prospectiveRisk`).
 4. **State-Specific On-Chain Recovery Synthesis:** Inspects live chain state and automatically synthesizes the protocol-correct counter-transaction:
-   - *Unconsumed EIP-7702 Authorization:* Constructs a 0-value self-transaction to increment the victim's account nonce from $n \to n+1$ (or multiple self-transactions if a future nonce was signed). Because EIP-7702 strictly checks `authority.nonce == auth.nonce`, the stolen authorization is rendered unusable via protocol-level nonce mismatch.
+   - *Unconsumed EIP-7702 Authorization:* Constructs a 0-value self-transaction to increment the victim's account nonce from $n \to n+1$ (or multiple bounded self-transactions capped at 100 advances with gas estimation if a future nonce was signed). Because EIP-7702 strictly checks `authority.nonce == auth.nonce`, the stolen authorization is rendered unusable via protocol-level nonce mismatch.
    - *Active EIP-7702 Delegation:* Constructs an EIP-7702 Type-4 transaction with authorization pointing to `address(0)` to wipe the `0xef0100...` delegation indicator back to a clean EOA.
    - *Permit2 Allowance:* Calls canonical `Permit2.invalidateNonces()` to bump nonces past signed nonces before broadcast, or `Permit2.lockdown()` to zero active allowances.
    - *Permit2 Signature:* Calls `Permit2.invalidateUnorderedNonces(wordPos, mask)` to flip the bitmap word position, neutralizing the signature.
-5. **Deterministic Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery state $s_R$ and proves on-chain that the exploit is neutralized, causing zero tracked asset loss:
+5. **Post-Recovery Bounded Re-Search & Replay Verification:** Proves safety on-chain through dual verification:
+   First, the engine reruns a complete bounded reachability exploration from the post-recovery state $s_R$, formally proving that no remaining exploit path exists:
+   $$\boxed{Explore(c, s_R, \mathcal{A}_{\text{modeled}}, k) \equiv \text{NO\_MODELED\_LOSS}}$$
+   Second, it replays the candidate exploit trace $\pi$ against $s_R$ to prove neutralization:
    $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad \land \quad L(s_R, T_\pi(s_R)) = 0}$$
    In execution semantics, this condition is satisfied when the replayed exploit trace either explicitly reverts on-chain (e.g., Permit2 nonce invalidation reverting with `InvalidNonce`) or executes harmlessly with zero tracked asset loss (e.g., EIP-7702 authorization skipped due to nonce mismatch, causing delegated drain calls to revert or become harmless no-ops on a clean EOA). Tracked asset balances remain completely unchanged under the replayed trace.
 
@@ -64,10 +70,10 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 │   └── foundry.toml            # Solc 0.8.17, via_ir = true, Prague EVM settings
 │
 ├── engine/                     # TypeScript Capability-Reachability Engine & API Server
-│   ├── src/capability/         # Dedicated decoders for raw wallet payloads (EIP-712 & EIP-7702)
-│   ├── src/search/             # Bounded DFS explorer (k ≤ 3) with EVM snapshots & reverts
+│   ├── src/capability/         # Capability decoders, CapabilityValidator (offline cryptographic verification)
+│   ├── src/search/             # Bounded DFS explorer (k ≤ 3), ActionProvider decoupling, ERC20LossOracle
 │   ├── src/recovery/           # State-specific recovery planners for EIP-7702 and Permit2
-│   └── src/server.ts           # HTTP API server bridging engine execution directly to the web dashboard
+│   └── src/server.ts           # HTTP API server (/api/analyze, /api/recover, /api/replay, /api/analyze-capability)
 │
 └── app/                        # Interactive Visualizer Dashboard (React 19 + Vite 8)
     └── src/                    # Live Anvil RPC integration, baseline contrast, 1-click on-chain recovery
