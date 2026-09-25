@@ -23,31 +23,36 @@ The complete verification pipeline was executed end-to-end on GitHub Actions CI 
 
 ---
 
-## 2. Empirical Benchmark Evidence Summary
+## 2. Benchmark A: Real-World Empirical Evaluation on 58 USENIX Delegates ($B_1$ vs. Aegis CRV)
 
 - **Reference Corpus:** Huang et al. (USENIX Security 2026), *"Revealing the Dark Side of Smart Accounts: An Empirical Study of EIP-7702 Incurred Risks in Blockchain Ecosystem"*.
 - **Inclusion Criterion ($C$):** $C = \text{EOA final detections} \cap \text{sensitive-function detections}$, yielding **58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon).
-- **Execution Methodology:** Original runtime bytecodes extracted directly from the USENIX artifact, deployed via `anvil_setCode` into standardized Prague-EVM snapshots.
+- **Execution Methodology:** Original runtime bytecodes extracted directly from the USENIX artifact, deployed via `anvil_setCode` into standardized Prague-EVM snapshots. Both Baseline $B_1$ (`StateAwareGreedyRunner`) and Aegis CRV (`ReachabilityExplorer` with $k \le 3$) evaluated on the exact same state $s_0$.
 
 ### Quantitative Results Matrix
 
-| Metric | Empirical Value | Rigorous Meaning |
-|---|:---:|---|
-| **Evaluated Real Artifact Contracts** | **58 (53 unique addresses, 47 unique bytecodes)** | Full inclusion set $C$ from USENIX Security '26 |
-| **Aegis Modeled Coverage** | **57 / 58 (98.3%)** | Supported capability action semantics |
-| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths proven on EVM state |
-| **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Real contract requiring additional preconditions |
-| **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Interface outside current capability generator semantics |
-| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Baseline missed all 51 executable loss cases ($\Delta = \$0.00$) |
-| **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% concrete loss reproducibility on fresh snapshots |
-| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L(s_R) = 0$) |
-| **Controlled Protocol-Negative Verification** | **4 / 4 (0 false alarms)** | Zero false alarms across 4 negative controls |
+| Metric | Baseline B₁ (Greedy Forward) | Aegis CRV (Tree Search) | Empirical Meaning |
+|---|:---:|:---:|---|
+| **Evaluated Real Artifact Contracts** | **58 (53 addresses, 47 bytecodes)** | **58 (53 addresses, 47 bytecodes)** | Full inclusion set $C$ from USENIX Security '26 |
+| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | **51 / 58 (87.9%)** | Identical 51/51 exploit discovery on all vulnerable delegates |
+| **Explored Without Loss (`NO_MODELED_LOSS`)** | **0 / 58 (0.0%)** | **6 / 58 (10.3%)** | Aegis rolls back reverting calls to certify no modeled loss |
+| **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | **1 / 58 (1.7%)** | Identical abstention on non-modeled selector (`0x628ff693`) |
+| **Execution Halted on Revert (`REVERT_ERROR`)** | **6 / 58 (10.3%)** | **0 / 58 (0.0%)** | Linear B₁ halts on revert; Aegis recovers via snapshot rollback |
+| **Immediate-Delta Baseline Miss Rate** | 51 / 51 (100%) | 51 / 51 (100%) | B₀ missed all 51 executable loss cases ($\Delta = \$0.00$) |
+| **Clean-State Witness Replay Success** | 51 / 51 (100%) | 51 / 51 (100%) | 100% concrete loss reproducibility on fresh snapshots |
+| **Post-Recovery Exploit Neutralization** | 51 / 51 (100%) | 51 / 51 (100%) | 100% of replayed exploits neutralized ($L(s_R) = 0$ via Type-4 recovery) |
+| **Controlled Protocol-Negative Verification** | **4 / 4 (0 false alarms)** | **4 / 4 (0 false alarms)** | Zero false alarms across 4 negative controls |
+
+#### Resource & Latency Comparison
+- **EVM Calls (Median):** B₁ = 2, Aegis CRV = 2 (51 FOUND_LOSS cases)
+- **EVM Snapshots (Median):** B₁ = 0, Aegis CRV = 2 (51 FOUND_LOSS cases)
+- **Runtime (Median):** B₁ = 63 ms, Aegis CRV = 79 ms (51 FOUND_LOSS cases)
 
 Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md).
 
 ---
 
-## 3. Controlled Empirical Comparison: $B_1$ vs. Aegis CRV
+## 3. Benchmark B: Controlled Adversarial Capability Benchmark ($B_1$ vs. Aegis CRV)
 
 Executed live via `make test-comparison` (`cd engine && npm run eval:comparison`):
 

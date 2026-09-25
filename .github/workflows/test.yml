@@ -58,6 +58,10 @@ jobs:
         working-directory: engine
         run: npm test
 
+      - name: Run Benchmark B (Adversarial Baseline Comparison)
+        working-directory: engine
+        run: npm run eval:comparison
+
   app:
     name: React Frontend Build
     runs-on: ubuntu-latest

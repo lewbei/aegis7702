@@ -15,6 +15,7 @@
     "src/search/**/*",
     "src/semantics/**/*",
     "src/recovery/**/*",
+    "src/baseline/**/*",
     "src/reachability.ts"
   ]
 }

@@ -112,35 +112,45 @@ To ground Aegis7702 in real-world threat intelligence rather than hand-crafted t
 ### Inclusion Rule & Methodology
 From the published USENIX artifact, the EOA-targeted detection pipeline contains **793 chain-address detection records** (718 unique contract addresses) across seven production blockchains. Intersecting the EOA final detections with confirmed sensitive function signatures (`AM_Detect_SensitiveSigName.jsonl`) yields **58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)** exhibiting dangerous drain primitives (`sweep(address[])`, `sweepTokens(address)`, `sweepERC20(address)`, `drainToken(address,uint256)`, etc.).
 
-Aegis7702 was evaluated against the complete 58-case intersection of EOA-targeted detections and sensitive-function detections from the published USENIX Security 2026 artifact, representing 53 unique real delegate contracts (47 unique runtime bytecodes) across six chains. Using the artifact's original runtime bytecode in a standardized Prague-EVM reconstruction, Aegis7702 produced executable asset-loss witnesses for 51/58 cases (87.9%), returned NO_MODELED_LOSS for six, and explicitly marked one unsupported interface as UNMODELED. All 51 discovered witnesses reproduced asset loss on clean-state replay, and all 51 were neutralized by nonce-based recovery in the benchmark environment.
+### Benchmark A: Real-World Empirical Evaluation on 58 USENIX Delegates ($B_1$ vs. Aegis CRV)
 
-We evaluated the **full inclusion set of all 58 chain-address cases (53 unique delegate addresses, 47 unique runtime bytecodes)** across 6 production blockchains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon) derived from the artifact, evaluated alongside 4 controlled protocol-negative cases. Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under a rigorous three-state classification (`FOUND_LOSS`, `NO_MODELED_LOSS`, `UNMODELED`):
+Aegis7702 was evaluated against the complete 58-case intersection of EOA-targeted detections and sensitive-function detections from the published USENIX Security 2026 artifact, representing 53 unique real delegate contracts (47 unique runtime bytecodes) across six chains (Ethereum, Base, BNB Chain, Optimism, Arbitrum, Polygon), alongside 4 controlled protocol-negative cases.
 
-| Evaluation Metric | Real-World Empirical Result | Meaning |
-|---|---|---|
-| **Evaluated Real Artifact Contracts** | **58 (53 unique addresses, 47 unique bytecodes)** | Full inclusion set $C$ from USENIX Security '26 |
-| **Aegis Modeled Coverage** | **57 / 58 (98.3%)** | Percentage of real delegates within supported action semantics |
-| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths discovered on EVM state |
-| **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Delegate executed without triggering loss under bounded model |
-| **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
-| **Structural B₀ Immediate-Delta Comparator** | **51 / 51 ($0.00 delta)** | Evaluated zero immediate tracked-asset loss at Step 0 for all 51 executable-loss cases |
-| **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
-| **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L(s_R) = 0$ via on-chain revert or clean-state no-op) |
-| **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
+Every contract was deployed via `anvil_setCode` using its actual artifact bytecode on local Prague EVM snapshots and evaluated under identical starting state $s_0$ by **both** the greedy linear forward runner ($B_1$ - `StateAwareGreedyRunner`) and the Aegis reachability explorer (CRV - `ReachabilityExplorer` with $k \le 3$):
+
+| Evaluation Metric | Baseline B₁ (Greedy Forward) | Aegis CRV (Tree Search) | Empirical Delta / Meaning |
+|---|:---:|:---:|---|
+| **Evaluated Real Artifact Contracts** | **58 (53 addresses, 47 bytecodes)** | **58 (53 addresses, 47 bytecodes)** | Full inclusion set $C$ from USENIX Security '26 |
+| **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | **51 / 58 (87.9%)** | Identical 51/51 exploit discovery on all vulnerable delegates |
+| **Explored Without Loss (`NO_MODELED_LOSS`)** | **0 / 58 (0.0%)** | **6 / 58 (10.3%)** | Aegis rolls back reverting calls to certify no modeled loss |
+| **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | **1 / 58 (1.7%)** | Identical abstention on non-modeled selector (`0x628ff693`) |
+| **Execution Halted on Revert (`REVERT_ERROR`)** | **6 / 58 (10.3%)** | **0 / 58 (0.0%)** | Linear B₁ halts on revert; Aegis recovers via snapshot rollback |
+| **Structural B₀ Immediate-Delta Comparator** | 51 / 51 ($0.00 delta) | 51 / 51 ($0.00 delta) | B₀ evaluated zero immediate loss at Step 0 for all 51 loss cases |
+| **Clean-State Witness Replay Success** | 51 / 51 (100%) | 51 / 51 (100%) | 100% concrete loss reproducibility on fresh snapshot replay |
+| **Post-Recovery Exploit Neutralization** | 51 / 51 (100%) | 51 / 51 (100%) | 100% of replayed exploits neutralized ($L(s_R) = 0$ via Type-4 recovery) |
+| **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
+
+#### Resource & Latency Comparison on Real USENIX Corpus
+
+| Resource Metric | Baseline B₁ (All 58 Cases) | Aegis CRV (All 58 Cases) | Baseline B₁ (51 FOUND_LOSS) | Aegis CRV (51 FOUND_LOSS) |
+|---|:---:|:---:|:---:|:---:|
+| **EVM Calls (Mean / Median)** | 1.97 / 2 | 1.97 / 2 | 2.00 / 2 | 2.00 / 2 |
+| **EVM Snapshots (Mean / Median)** | **0.00 / 0** | **1.97 / 2** | **0.00 / 0** | **2.00 / 2** |
+| **Runtime ms (Median)** | **63 ms** | **79 ms** | **63 ms** | **79 ms** |
 
 Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (full 58-case execution matrix documented in [`testdata/AEGIS_USENIX_EVALUATION.md`](./testdata/AEGIS_USENIX_EVALUATION.md)).
 
 ---
 
-## Controlled Empirical Comparison: State-Aware Greedy Runner ($B_1$) vs. Aegis Reachability Explorer (CRV)
+### Benchmark B: Controlled Adversarial Capability Benchmark ($B_1$ vs. Aegis CRV)
 
-To rigorously isolate the contribution of **bounded tree search with EVM backtracking** from simple multi-step simulation, we evaluated Aegis against a strong, state-aware reference baseline ($B_1$ - `StateAwareGreedyRunner`) under identical EVM environments, knowledge, and bounded step constraints ($k \le 3$):
+To rigorously isolate the contribution of **bounded tree search with EVM backtracking** from simple forward simulation, we evaluated Aegis against the state-aware reference baseline ($B_1$ - `StateAwareGreedyRunner`) under controlled adversarial fixtures ($k \le 3$):
 
 * **$B_0$ (Immediate-Delta Comparator):** Inspects balance delta at $t = 0$. By construction, detached signatures (EIP-7702, Permit2) yield $\Delta = \$0.00$. Defeating $B_0$ only justifies *multi-step execution*, not *tree search*.
 * **$B_1$ (State-Aware Greedy Linear Forward Runner):** Understands EIP-7702 and Permit2, relays Type-4 authorizations when required, but executes candidate actions **greedily and linearly forward without state snapshots (`evm_snapshot` / `evm_revert`)**. Uses single-trace replay for post-recovery verification.
 * **Aegis CRV (`ReachabilityExplorer`):** Bounded tree search ($k \le 3$) with state snapshotting, backtracking across reverting and decoy branches, and full post-recovery bounded re-search from state $s_R$.
 
-### Empirical Comparison Matrix
+#### Empirical Comparison Matrix
 
 Executed live via `make test-comparison` (`npm run eval:comparison`):
 
@@ -157,7 +167,7 @@ Executed live via `make test-comparison` (`npm run eval:comparison`):
 
 *\*Latencies represent single-run measurements on local Anvil nodes and illustrate relative overhead rather than statistical microbenchmarks.*
 
-### Scientific Takeaways & Honest Concessions
+#### Scientific Takeaways & Honest Concessions
 1. **Concession on Linear Chains:** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 executable-loss cases in our standardized USENIX '26 reconstruction), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. We explicitly do **not** claim tree search is superior on simple linear topologies.
 2. **Robustness to Branch-Order Ambiguity (Policy Stress Test):** A first-action greedy execution policy is branch-order sensitive: when an adversarial contract presents multiple entrypoints where decoy or reverting branches precede the drain (Fixture 3), the greedy policy halts on the first revert with `REVERT_ERROR`. Aegis CRV uses EVM snapshots (`evm_snapshot` / `evm_revert`) to recover from reverting branches and continue exploration, making it robust against candidate ordering.
 3. **Trace-Specific Mitigation $\neq$ State Re-Verification:** A single-trace verifier evaluates whether the historical exploit trace $\pi^*$ is neutralized (`TRACE_BLOCKED`), making no claim about overall account safety. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay confirms the EIP-7702 exploit was blocked. Re-searching the account's candidate capabilities on state $s_R$ uncovers the unrevoked Permit2 drain and flags incomplete recovery.
