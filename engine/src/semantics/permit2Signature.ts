@@ -25,12 +25,17 @@ export class Permit2SignatureSemantics {
     const bit = 1n << BigInt(bitPos);
 
     // 1. Read on-chain unordered nonce bitmap
-    const currentWord: bigint = await client.readContract({
-      address: permit2,
-      abi: PERMIT2_ABI,
-      functionName: "nonceBitmap",
-      args: [owner, wordPos]
-    });
+    let currentWord = 0n;
+    try {
+      currentWord = await client.readContract({
+        address: permit2,
+        abi: PERMIT2_ABI,
+        functionName: "nonceBitmap",
+        args: [owner, wordPos]
+      });
+    } catch {
+      return { status: "UNMODELED", reason: `Permit2 contract at ${permit2} not deployed or unavailable` };
+    }
 
     // If bit is already set (flipped), the nonce is already spent or invalidated
     const isNonceAvailable = (currentWord & bit) === 0n;
@@ -41,14 +46,14 @@ export class Permit2SignatureSemantics {
       abi: ERC20_ABI,
       functionName: "balanceOf",
       args: [owner]
-    });
+    }).catch(() => 0n);
 
     const tokenApprovalToPermit2: bigint = await client.readContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "allowance",
       args: [owner, permit2]
-    });
+    }).catch(() => 0n);
 
     // Action: permitTransferFrom
     if (isNonceAvailable && victimBalance > 0n && tokenApprovalToPermit2 > 0n) {

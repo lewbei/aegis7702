@@ -263,7 +263,7 @@ export class EIP7702Semantics {
         abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [owner]
-      });
+      }).catch(() => 0n);
     }
 
     if (hasDelegation && token && victimBalance > 0n) {

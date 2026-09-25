@@ -91,3 +91,22 @@ export interface Counterexample {
     formatted: string;
   };
 }
+
+export type VerificationOutcome =
+  | "FOUND_LOSS"
+  | "NO_MODELED_LOSS"
+  | "UNMODELED"
+  | "CONDITIONAL_RISK"
+  | "INVALID_CAPABILITY";
+
+export interface ProspectiveRisk {
+  condition: string;
+  candidateTrace: Action[];
+  projectedLoss: {
+    token: Address;
+    symbol: string;
+    amount: string;
+    formatted: string;
+  };
+}
+

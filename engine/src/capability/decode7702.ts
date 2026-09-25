@@ -17,8 +17,8 @@ export interface RawEIP7702AuthorizationInput {
 /**
  * Decodes raw wallet EIP-7702 signed authorization tuple into a typed EIP7702Capability.
  */
-export function decode7702(input: RawEIP7702AuthorizationInput): EIP7702Capability {
-  const rawTarget = input.address ?? input.contractAddress;
+export function decode7702(input: RawEIP7702AuthorizationInput & { delegateAddress?: Address }): EIP7702Capability {
+  const rawTarget = input.address ?? input.contractAddress ?? input.delegateAddress;
   if (!rawTarget) {
     throw new Error("Invalid EIP-7702 authorization: missing delegate address");
   }

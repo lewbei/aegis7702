@@ -2,12 +2,13 @@ import { PublicClient, Address, Hex } from "viem";
 import { EIP7702Capability } from "../capability/types.js";
 
 export interface EIP7702RecoveryAction {
-  strategy: "ADVANCE_NONCE" | "CLEAR_DELEGATION" | "FUTURE_NONCE_MULTI_ADVANCE" | "NOOP";
+  strategy: "ADVANCE_NONCE" | "CLEAR_DELEGATION" | "FUTURE_NONCE_MULTI_ADVANCE" | "RECOVERY_INFEASIBLE" | "NOOP";
   description: string;
   target: Address;
   calldata: Hex;
   actor: Address;
   requiredAdvances?: number;
+  estimatedGas?: bigint;
   transactions?: Array<{ to: Address; value: bigint; data: Hex }>;
   recoveryDelegation?: {
     address: Address;
@@ -74,6 +75,20 @@ export class EIP7702RecoveryPlanner {
 
     // currNonce < capNonce: Future nonce requires advancing to capNonce + 1
     const needed = Number(capNonce - currNonce + 1n);
+    const MAX_NONCE_ADVANCES = 100;
+
+    if (needed > MAX_NONCE_ADVANCES) {
+      return {
+        strategy: "RECOVERY_INFEASIBLE",
+        description: `Future-nonce authorization target (${capNonce}) requires ${needed} self-transactions, exceeding safe automated execution limit (${MAX_NONCE_ADVANCES}). Automated recovery infeasible due to gas cost / execution length.`,
+        target: owner,
+        calldata: "0x",
+        actor: owner,
+        requiredAdvances: needed,
+        estimatedGas: BigInt(needed) * 21000n
+      };
+    }
+
     const txs: Array<{ to: Address; value: bigint; data: Hex }> = [];
     for (let i = 0; i < needed; i++) {
       txs.push({ to: owner, value: 0n, data: "0x" });
@@ -86,7 +101,8 @@ export class EIP7702RecoveryPlanner {
       calldata: "0x",
       actor: owner,
       requiredAdvances: needed,
-      transactions: txs
+      transactions: txs,
+      estimatedGas: BigInt(needed) * 21000n
     };
   }
 }

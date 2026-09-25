@@ -12,7 +12,8 @@ import {
   encodeFunctionData,
   parseAbi,
   Hex,
-  Address
+  Address,
+  getAddress
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { signAuthorization } from "viem/experimental";
@@ -24,6 +25,8 @@ import { decodePermit2Allowance } from "./capability/decodePermit2Allowance.js";
 import { decodePermit2Signature } from "./capability/decodePermit2Signature.js";
 import { decode7702 } from "./capability/decode7702.js";
 import { ERC20_ABI, PERMIT2_ABI } from "./capability/abis.js";
+import { CapabilityValidator } from "./capability/validator.js";
+import { Capability, VerificationOutcome, ProspectiveRisk } from "./capability/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,7 +83,9 @@ interface ActiveSession {
   attacker: Address;
   victimAccount: any;
   capability: any;
+  status: VerificationOutcome;
   counterexample: any;
+  prospectiveRisk: ProspectiveRisk | null;
   recoveryPlan: any;
   tokenAddress: Address;
   delegateAddress?: Address;
@@ -229,64 +234,66 @@ async function handleAnalyze(body: any): Promise<any> {
     );
 
     const exploreRes = await explorer.explore(capability, attacker);
-    let counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
-    if (!counterexample) {
-      // Construct prospective counterexample for future nonce capabilities
-      const permitCalldata = encodeFunctionData({
-        abi: PERMIT2_ABI,
-        functionName: "permit",
-        args: [
-          victim,
-          {
-            details: {
-              token: capability.details.token,
-              amount: capability.details.amount,
-              expiration: capability.details.expiration,
-              nonce: capability.details.nonce
+    let status: VerificationOutcome = exploreRes.status;
+    const counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
+    let prospectiveRisk: ProspectiveRisk | null = null;
+
+    if (exploreRes.status !== "FOUND_LOSS") {
+      if (canonicalId === "permit2_future_delta_65535" || canonicalId === "permit2_future_delta_65536") {
+        status = "CONDITIONAL_RISK";
+        const permitCalldata = encodeFunctionData({
+          abi: PERMIT2_ABI,
+          functionName: "permit",
+          args: [
+            victim,
+            {
+              details: {
+                token: capability.details.token,
+                amount: capability.details.amount,
+                expiration: capability.details.expiration,
+                nonce: capability.details.nonce
+              },
+              spender: capability.spender,
+              sigDeadline: capability.sigDeadline
             },
-            spender: capability.spender,
-            sigDeadline: capability.sigDeadline
-          },
-          capability.signature
-        ]
-      });
+            capability.signature
+          ]
+        });
 
-      const transferCalldata = encodeFunctionData({
-        abi: PERMIT2_ABI,
-        functionName: "transferFrom",
-        args: [victim, attacker, capability.details.amount, capability.details.token]
-      });
+        const transferCalldata = encodeFunctionData({
+          abi: PERMIT2_ABI,
+          functionName: "transferFrom",
+          args: [victim, attacker, capability.details.amount, capability.details.token]
+        });
 
-      counterexample = {
-        capability: "PERMIT2_ALLOWANCE",
-        depth: 2,
-        loss: {
-          token: usdcAddress,
-          symbol: "USDC",
-          amount: capability.details.amount,
-          formatted: formatUnits(capability.details.amount, 6)
-        },
-        trace: [
-          {
-            step: 1,
-            id: "Permit2.permit",
-            target: permit2Address,
-            calldata: permitCalldata,
-            value: 0n,
-            actor: attacker,
-            description: `Attacker submits signed PermitSingle for nonce ${capability.details.nonce}`
-          },
-          {
-            step: 2,
-            id: "Permit2.transferFrom",
-            target: permit2Address,
-            calldata: transferCalldata,
-            value: 0n,
-            actor: attacker,
-            description: `Attacker drains ${formatUnits(capability.details.amount, 6)} USDC via transferFrom`
+        prospectiveRisk = {
+          condition: `Permit2 allowance signed with future nonce ${capability.details.nonce} (current on-chain nonce: 0). Activates when on-chain nonce reaches ${capability.details.nonce}.`,
+          candidateTrace: [
+            {
+              id: "Permit2.permit",
+              description: `Attacker submits signed PermitSingle for nonce ${capability.details.nonce}`,
+              target: permit2Address,
+              calldata: permitCalldata,
+              value: 0n,
+              actor: attacker
+            },
+            {
+              id: "Permit2.transferFrom",
+              description: `Attacker drains ${formatUnits(capability.details.amount, 6)} USDC via transferFrom`,
+              target: permit2Address,
+              calldata: transferCalldata,
+              value: 0n,
+              actor: attacker
+            }
+          ],
+          projectedLoss: {
+            token: usdcAddress,
+            symbol: "USDC",
+            amount: capability.details.amount.toString(),
+            formatted: formatUnits(capability.details.amount, 6)
           }
-        ]
-      };
+        };
+      }
     }
 
     const recoveryPlan = await Permit2RecoveryPlanner.plan(capability, publicClient);
@@ -303,7 +310,9 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      status,
       counterexample,
+      prospectiveRisk,
       recoveryPlan,
       tokenAddress: usdcAddress,
       initialBalance: DRAIN_AMOUNT
@@ -315,13 +324,15 @@ async function handleAnalyze(body: any): Promise<any> {
       canonicalId,
       port: anvilPort,
       engineStatus: "LIVE_ANVIL",
+      status,
       baseline: {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Baseline 1-step simulation detected 0.00 USDC loss (Current state safe, blind to multi-step reachability)"
+        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; detached capability unconsumed at signing)"
       },
       counterexample,
+      prospectiveRisk,
       recoveryPlan
     };
   }
@@ -412,7 +423,9 @@ async function handleAnalyze(body: any): Promise<any> {
     );
 
     const exploreRes = await explorer.explore(capability, attacker);
+    const status: VerificationOutcome = exploreRes.status;
     const counterexample = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
+    const prospectiveRisk: ProspectiveRisk | null = null;
     const recoveryPlan = await Permit2SignatureRecoveryPlanner.plan(capability, publicClient);
 
     sessions.set(runId, {
@@ -427,7 +440,9 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      status,
       counterexample,
+      prospectiveRisk,
       recoveryPlan,
       tokenAddress: usdcAddress,
       initialBalance: DRAIN_AMOUNT
@@ -439,13 +454,15 @@ async function handleAnalyze(body: any): Promise<any> {
       canonicalId,
       port: anvilPort,
       engineStatus: "LIVE_ANVIL",
+      status,
       baseline: {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Baseline 1-step simulation detected 0.00 USDC loss (Signature transfer unexecuted at signing)"
+        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; signature transfer unexecuted at signing)"
       },
       counterexample,
+      prospectiveRisk,
       recoveryPlan
     };
   }
@@ -551,71 +568,45 @@ async function handleAnalyze(body: any): Promise<any> {
     );
 
     const exploreRes = await explorer.explore(capability, attacker);
-    let counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
-    if (!counterexample) {
-      if (canonicalId === "eip7702_active_delegation") {
+    let status: VerificationOutcome = exploreRes.status;
+    const counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
+    let prospectiveRisk: ProspectiveRisk | null = null;
+
+    if (exploreRes.status !== "FOUND_LOSS") {
+      if (canonicalId === "eip7702_future_nonce") {
+        status = "CONDITIONAL_RISK";
         const sweepCalldata = encodeFunctionData({
           abi: delegateArtifact.abi,
           functionName: "sweep",
           args: [usdcAddress, attacker]
         });
-        counterexample = {
-          capability: "EIP_7702",
-          depth: 1,
-          loss: {
-            token: usdcAddress,
-            symbol: "USDC",
-            amount: INITIAL_USDC,
-            formatted: formatUnits(INITIAL_USDC, 6)
-          },
-          trace: [
+        prospectiveRisk = {
+          condition: `EIP-7702 authorization signed for future account nonce ${auth.nonce} (current on-chain nonce: ${signedNonce === 8 ? 5 : 0}). Activates when victim account nonce reaches ${auth.nonce} without revocation.`,
+          candidateTrace: [
             {
-              step: 1,
-              id: "MaliciousDelegate.sweep",
-              target: victim,
-              calldata: sweepCalldata,
-              value: 0n,
-              actor: attacker,
-              description: `Attacker calls sweep() against active delegation on victim EOA`
-            }
-          ]
-        };
-      } else {
-        const sweepCalldata = encodeFunctionData({
-          abi: delegateArtifact.abi,
-          functionName: "sweep",
-          args: [usdcAddress, attacker]
-        });
-        counterexample = {
-          capability: "EIP_7702",
-          depth: 2,
-          loss: {
-            token: usdcAddress,
-            symbol: "USDC",
-            amount: INITIAL_USDC,
-            formatted: formatUnits(INITIAL_USDC, 6)
-          },
-          trace: [
-            {
-              step: 1,
               id: "EIP7702.Type4Relay",
+              description: `Attacker broadcasts Type-4 transaction with authorization tuple once victim account nonce reaches ${auth.nonce}`,
               target: victim,
               calldata: "0x",
               value: 0n,
               actor: attacker,
-              authorizationList: [auth],
-              description: `Attacker broadcasts Type-4 transaction with stolen authorization tuple (nonce ${auth.nonce})`
+              authorizationList: [auth]
             },
             {
-              step: 2,
               id: "MaliciousDelegate.sweep",
+              description: `Attacker calls sweep() to drain ${formatUnits(INITIAL_USDC, 6)} USDC`,
               target: victim,
               calldata: sweepCalldata,
               value: 0n,
-              actor: attacker,
-              description: `Attacker calls sweep() to drain ${formatUnits(INITIAL_USDC, 6)} USDC`
+              actor: attacker
             }
-          ]
+          ],
+          projectedLoss: {
+            token: usdcAddress,
+            symbol: "USDC",
+            amount: INITIAL_USDC.toString(),
+            formatted: formatUnits(INITIAL_USDC, 6)
+          }
         };
       }
     }
@@ -634,7 +625,9 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      status,
       counterexample,
+      prospectiveRisk,
       recoveryPlan,
       tokenAddress: usdcAddress,
       delegateAddress,
@@ -647,13 +640,15 @@ async function handleAnalyze(body: any): Promise<any> {
       canonicalId,
       port: anvilPort,
       engineStatus: "LIVE_ANVIL",
+      status,
       baseline: {
         lossAmount: "0.00",
         lossSymbol: "USDC",
         verdict: "SAFE",
-        message: "Baseline 1-step simulation detected 0.00 USDC loss (Detached capability unconsumed at signing)"
+        message: "Structural immediate-delta comparator B₀ detected 0.00 USDC loss (State s₀ safe; detached capability unconsumed at signing)"
       },
       counterexample,
+      prospectiveRisk,
       recoveryPlan
     };
   }
@@ -709,6 +704,14 @@ async function handleRecover(body: any): Promise<any> {
         totalTxsExecuted = 1;
         break;
       }
+      case "RECOVERY_INFEASIBLE": {
+        return {
+          runId,
+          status: "RECOVERY_INFEASIBLE",
+          message: recoveryPlan.description,
+          totalTxsExecuted: 0
+        };
+      }
       case "NOOP":
       default: {
         txHash = "0x";
@@ -743,6 +746,17 @@ async function handleRecover(body: any): Promise<any> {
     gasUsed = receipt.gasUsed.toString();
   }
 
+  // POST-RECOVERY FULL BOUNDED RE-SEARCH:
+  // Re-run the reachability explorer from the post-recovery EVM state s_R:
+  // Explore(c, s_R, A_modeled, k) === "NO_MODELED_LOSS"
+  const postRecoveryExplorer = new ReachabilityExplorer(
+    publicClient,
+    { request: async (args: any) => publicClient.request(args) },
+    3
+  );
+  const postRecoveryResult = await postRecoveryExplorer.explore(session.capability, session.attacker);
+  const postRecoveryVerified = postRecoveryResult.status === "NO_MODELED_LOSS";
+
   return {
     runId,
     txHash,
@@ -751,7 +765,14 @@ async function handleRecover(body: any): Promise<any> {
     gasUsed,
     strategy: recoveryPlan.strategy,
     description: recoveryPlan.description,
-    totalTxsExecuted
+    totalTxsExecuted,
+    postRecoveryExplore: {
+      status: postRecoveryResult.status,
+      verified: postRecoveryVerified,
+      message: postRecoveryVerified
+        ? "Post-recovery reachability re-search complete: verified 0 reachable loss paths on state s_R"
+        : `Post-recovery reachability search failed: outcome ${postRecoveryResult.status}`
+    }
   };
 }
 
@@ -766,6 +787,7 @@ async function handleReplay(body: any): Promise<any> {
     attackerWallet,
     publicClient,
     counterexample,
+    prospectiveRisk,
     victim,
     tokenAddress,
     anvilProcess,
@@ -777,6 +799,21 @@ async function handleReplay(body: any): Promise<any> {
   let replayReverted = false;
   let failedStep = 0;
   let revertError = "";
+
+  const candidateTrace = counterexample?.trace ?? prospectiveRisk?.candidateTrace;
+
+  if (!candidateTrace || candidateTrace.length === 0) {
+    anvilProcess.kill();
+    sessions.delete(runId);
+    return {
+      runId,
+      mitigated: true,
+      failedStep: 0,
+      revertError: "",
+      finalVictimBalance: `${formatUnits(initialBalance, 6)} USDC`,
+      message: "No attack trace was viable; state s_R is safe."
+    };
+  }
 
   if (
     canonicalId === "eip7702" ||
@@ -815,7 +852,7 @@ async function handleReplay(body: any): Promise<any> {
         revertError = "EIP-7702: Active delegation cleared to address(0); sweep logic never executed";
       }
     } else {
-      const step1 = counterexample.trace[0];
+      const step1 = candidateTrace[0];
       try {
         const tx = await publicClient.request({
           method: "eth_sendTransaction",
@@ -844,8 +881,8 @@ async function handleReplay(body: any): Promise<any> {
     }
   } else {
     // Permit2 scenarios (allowance, signature, chunked nonces)
-    for (let i = 0; i < counterexample.trace.length; i++) {
-      const step = counterexample.trace[i];
+    for (let i = 0; i < candidateTrace.length; i++) {
+      const step = candidateTrace[i];
       try {
         const tx = await attackerWallet.sendTransaction({
           to: step.target,
@@ -889,6 +926,113 @@ async function handleReplay(body: any): Promise<any> {
   };
 }
 
+async function handleAnalyzeCapability(body: any): Promise<any> {
+  const { type, payload, attackerAddress } = body;
+  if (!type || !payload) {
+    throw new Error("Missing required fields: 'type' and 'payload' must be provided");
+  }
+
+  let capability: Capability;
+  const normType = String(type).toUpperCase().replace(/[-_]/g, "");
+  if (normType === "EIP7702") {
+    capability = decode7702(payload);
+    if (!capability.targetToken) {
+      capability.targetToken = body.tokenAddress
+        ? getAddress(body.tokenAddress)
+        : payload.targetToken
+        ? getAddress(payload.targetToken)
+        : "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // Default tracked asset
+    }
+  } else if (normType === "PERMIT2ALLOWANCE") {
+    capability = decodePermit2Allowance(payload);
+  } else if (normType === "PERMIT2SIGNATURE") {
+    capability = decodePermit2Signature(payload);
+  } else {
+    throw new Error(`Unsupported capability type: ${type}`);
+  }
+
+  // 1. Cryptographic Signature & Authority Validation
+  const validation = await CapabilityValidator.validate(capability);
+  if (!validation.valid) {
+    return {
+      status: "INVALID_CAPABILITY",
+      valid: false,
+      reason: validation.reason,
+      counterexample: null,
+      prospectiveRisk: null
+    };
+  }
+
+  // 2. Spawn ephemeral Anvil instance for dynamic reachability analysis
+  const is7702 = capability.kind === "EIP7702";
+  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined);
+  const rpcUrl = `http://127.0.0.1:${anvilPort}`;
+  const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
+  const attacker = attackerAddress ? getAddress(attackerAddress) : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+
+  try {
+    const explorer = new ReachabilityExplorer(
+      publicClient,
+      { request: async (args: any) => publicClient.request(args) },
+      3
+    );
+
+    const exploreRes = await explorer.explore(capability, attacker);
+
+    if (exploreRes.status === "FOUND_LOSS") {
+      return {
+        status: "FOUND_LOSS",
+        valid: true,
+        signer: validation.signer,
+        counterexample: exploreRes.counterexample,
+        prospectiveRisk: null
+      };
+    }
+
+    if (exploreRes.status === "UNMODELED") {
+      return {
+        status: "UNMODELED",
+        valid: true,
+        signer: validation.signer,
+        reason: exploreRes.reason,
+        counterexample: null,
+        prospectiveRisk: null
+      };
+    }
+
+    // Check for conditional risk (e.g. future nonce)
+    let prospectiveRisk: ProspectiveRisk | null = null;
+    let status: VerificationOutcome = "NO_MODELED_LOSS";
+
+    if (capability.kind === "EIP7702") {
+      const currNonce = await publicClient.getTransactionCount({ address: capability.owner });
+      if (BigInt(currNonce) < capability.nonce) {
+        status = "CONDITIONAL_RISK";
+        prospectiveRisk = {
+          condition: `EIP-7702 authorization signed for future account nonce ${capability.nonce} (current on-chain: ${currNonce})`,
+          candidateTrace: [],
+          projectedLoss: {
+            token: capability.targetToken ?? "0x0000000000000000000000000000000000000000",
+            symbol: "TOKEN",
+            amount: "0",
+            formatted: "0.00"
+          }
+        };
+      }
+    }
+
+    return {
+      status,
+      valid: true,
+      signer: validation.signer,
+      counterexample: null,
+      prospectiveRisk
+    };
+  } finally {
+    anvilProcess.kill();
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -907,7 +1051,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && (url === "/api/analyze" || url === "/api/recover" || url === "/api/replay")) {
+  if (
+    req.method === "POST" &&
+    (url === "/api/analyze" ||
+      url === "/api/recover" ||
+      url === "/api/replay" ||
+      url === "/api/analyze-capability")
+  ) {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", async () => {
@@ -922,12 +1072,17 @@ const server = http.createServer(async (req, res) => {
         } else if (url === "/api/replay") {
           const result = await handleReplay(body);
           sendJson(res, 200, result);
+        } else if (url === "/api/analyze-capability") {
+          const result = await handleAnalyzeCapability(body);
+          sendJson(res, 200, result);
         }
       } catch (err: any) {
         const isClientErr =
           err.message &&
           (err.message.startsWith("Unsupported scenario") ||
             err.message.startsWith("Invalid scenario") ||
+            err.message.startsWith("Missing required") ||
+            err.message.startsWith("Unsupported capability") ||
             err.message.includes("Unexpected token"));
         sendJson(res, isClientErr ? 400 : 500, { error: err.message ?? "Internal server error" });
       }

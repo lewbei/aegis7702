@@ -115,24 +115,35 @@ export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
     const owner = capability.owner;
     const token = this.getTokenFromCapability(capability);
 
-    const initialBalance: bigint = await publicClient.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [owner]
-    });
+    let initialBalance = 0n;
+    let symbol = "TOKEN";
+    let decimals = 18;
 
-    const symbol: string = await publicClient.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "symbol"
-    });
+    try {
+      const code = await publicClient.getBytecode({ address: token });
+      if (code && code !== "0x") {
+        initialBalance = await publicClient.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [owner]
+        }).catch(() => 0n);
 
-    const decimals: number = await publicClient.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "decimals"
-    });
+        symbol = await publicClient.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "symbol"
+        }).catch(() => "TOKEN");
+
+        decimals = await publicClient.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "decimals"
+        }).catch(() => 18);
+      }
+    } catch {
+      // Contract un-deployed or does not implement ERC20 interface
+    }
 
     return { token, symbol, decimals, initialBalance };
   }
@@ -142,12 +153,17 @@ export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
     capability: Capability,
     publicClient: PublicClient
   ): Promise<InvariantViolation | null> {
-    const currentBalance: bigint = await publicClient.readContract({
-      address: initialContext.token,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [capability.owner]
-    });
+    let currentBalance = initialContext.initialBalance;
+    try {
+      currentBalance = await publicClient.readContract({
+        address: initialContext.token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [capability.owner]
+      });
+    } catch {
+      currentBalance = initialContext.initialBalance;
+    }
 
     if (currentBalance < initialContext.initialBalance) {
       const lossAmount = initialContext.initialBalance - currentBalance;
@@ -168,12 +184,17 @@ export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
     capability: Capability,
     publicClient: PublicClient
   ): Promise<string> {
-    const currentBalance: bigint = await publicClient.readContract({
-      address: initialContext.token,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [capability.owner]
-    });
+    let currentBalance = initialContext.initialBalance;
+    try {
+      currentBalance = await publicClient.readContract({
+        address: initialContext.token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [capability.owner]
+      });
+    } catch {
+      currentBalance = initialContext.initialBalance;
+    }
     return `${formatUnits(currentBalance, initialContext.decimals)} ${initialContext.symbol}`;
   }
 

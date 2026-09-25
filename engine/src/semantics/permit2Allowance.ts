@@ -19,12 +19,19 @@ export class Permit2AllowanceSemantics {
     const permit2 = capability.permit2Address;
 
     // 1. Read on-chain state from Permit2
-    const [allowedAmount, expiration, currentNonce] = await client.readContract({
-      address: permit2,
-      abi: PERMIT2_ABI,
-      functionName: "allowance",
-      args: [owner, token, capability.spender]
-    });
+    let allowedAmount = 0n;
+    let expiration = 0;
+    let currentNonce = 0;
+    try {
+      [allowedAmount, expiration, currentNonce] = await client.readContract({
+        address: permit2,
+        abi: PERMIT2_ABI,
+        functionName: "allowance",
+        args: [owner, token, capability.spender]
+      });
+    } catch {
+      return { status: "UNMODELED", reason: `Permit2 contract at ${permit2} not deployed or unavailable` };
+    }
 
     // 2. Read victim's ERC20 balance and allowance to Permit2
     const victimBalance = await client.readContract({
@@ -32,14 +39,14 @@ export class Permit2AllowanceSemantics {
       abi: ERC20_ABI,
       functionName: "balanceOf",
       args: [owner]
-    });
+    }).catch(() => 0n);
 
     const tokenApprovalToPermit2 = await client.readContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "allowance",
       args: [owner, permit2]
-    });
+    }).catch(() => 0n);
 
     // Action Type 1: Can the attacker submit the PermitSingle?
     // Valid if current on-chain nonce matches signed nonce

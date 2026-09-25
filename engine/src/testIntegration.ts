@@ -1,6 +1,9 @@
 import { spawn } from "child_process";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { createPublicClient, http as viemHttp } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { signAuthorization } from "viem/experimental";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +56,12 @@ async function runIntegrationTests() {
       });
       if (!analyzeRes.ok) throw new Error(`Analyze failed for ${sc.id}: ${await analyzeRes.text()}`);
       const analyzeData = await analyzeRes.json();
+      if (analyzeData.status !== "FOUND_LOSS") {
+        throw new Error(`Expected FOUND_LOSS status for ${sc.id} but got ${analyzeData.status}`);
+      }
+      if (!analyzeData.counterexample) {
+        throw new Error(`Expected physical counterexample for ${sc.id}`);
+      }
 
       const recoverRes = await fetch(`${BASE_URL}/api/recover`, {
         method: "POST",
@@ -60,6 +69,14 @@ async function runIntegrationTests() {
         body: JSON.stringify({ runId: analyzeData.runId })
       });
       if (!recoverRes.ok) throw new Error(`Recover failed for ${sc.id}: ${await recoverRes.text()}`);
+      const recoverData = await recoverRes.json();
+      if (
+        !recoverData.postRecoveryExplore ||
+        recoverData.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+        !recoverData.postRecoveryExplore.verified
+      ) {
+        throw new Error(`Post-recovery bounded search failed for ${sc.id}: ${JSON.stringify(recoverData.postRecoveryExplore)}`);
+      }
 
       const replayRes = await fetch(`${BASE_URL}/api/replay`, {
         method: "POST",
@@ -72,7 +89,7 @@ async function runIntegrationTests() {
       if (!replayData.mitigated) {
         throw new Error(`Mitigation failed for canonical scenario ${sc.id}`);
       }
-      console.log(`     ✓ Canonical ${sc.name}: analyze, recover, replay mitigated=true (100% verified)`);
+      console.log(`     ✓ Canonical ${sc.name}: status=FOUND_LOSS, postRecoveryExplore=NO_MODELED_LOSS, replay mitigated=true (100% verified)`);
     }
 
     // 3. Adversarial Test 1: EIP-7702 Multi-Advance (current=5, auth=8)
@@ -84,6 +101,17 @@ async function runIntegrationTests() {
     });
     if (!eipFutureRes.ok) throw new Error(`Analyze eip7702_future_nonce failed: ${await eipFutureRes.text()}`);
     const eipFutureData = await eipFutureRes.json();
+
+    if (eipFutureData.status !== "CONDITIONAL_RISK") {
+      throw new Error(`Expected CONDITIONAL_RISK for future nonce but got ${eipFutureData.status}`);
+    }
+    if (eipFutureData.counterexample !== null) {
+      throw new Error(`Fabricated counterexample detected for unexecutable future-nonce scenario!`);
+    }
+    if (!eipFutureData.prospectiveRisk) {
+      throw new Error(`Expected prospectiveRisk for future-nonce scenario`);
+    }
+    console.log(`  ✓ Unexecutable future-nonce strictly verified: status=CONDITIONAL_RISK, counterexample=null, prospectiveRisk populated`);
 
     if (eipFutureData.recoveryPlan.strategy !== "FUTURE_NONCE_MULTI_ADVANCE") {
       throw new Error(`Expected FUTURE_NONCE_MULTI_ADVANCE but got ${eipFutureData.recoveryPlan.strategy}`);
@@ -100,6 +128,15 @@ async function runIntegrationTests() {
         body: JSON.stringify({ runId: eipFutureData.runId })
       })
     ).json();
+
+    if (
+      !eipFutureRec.postRecoveryExplore ||
+      eipFutureRec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      !eipFutureRec.postRecoveryExplore.verified
+    ) {
+      throw new Error(`Post-recovery bounded search failed for eip7702_future_nonce: ${JSON.stringify(eipFutureRec.postRecoveryExplore)}`);
+    }
+    console.log(`  ✓ Post-recovery bounded search verified 0 loss paths on state s_R: ${eipFutureRec.postRecoveryExplore.status}`);
 
     if (eipFutureRec.totalTxsExecuted !== 4) {
       throw new Error(`Expected 4 executed self-transactions but got ${eipFutureRec.totalTxsExecuted}`);
@@ -169,6 +206,17 @@ async function runIntegrationTests() {
     if (!p2Delta65535Res.ok) throw new Error(`Analyze delta 65535 failed: ${await p2Delta65535Res.text()}`);
     const p2Delta65535Data = await p2Delta65535Res.json();
 
+    if (p2Delta65535Data.status !== "CONDITIONAL_RISK") {
+      throw new Error(`Expected CONDITIONAL_RISK for delta 65535 but got ${p2Delta65535Data.status}`);
+    }
+    if (p2Delta65535Data.counterexample !== null) {
+      throw new Error(`Fabricated counterexample detected for unexecutable Permit2 delta 65535!`);
+    }
+    if (!p2Delta65535Data.prospectiveRisk) {
+      throw new Error(`Expected prospectiveRisk for delta 65535`);
+    }
+    console.log(`     ✓ Delta=65535 strictly verified: status=CONDITIONAL_RISK, counterexample=null, prospectiveRisk populated`);
+
     const p2Delta65535Rec = await (
       await fetch(`${BASE_URL}/api/recover`, {
         method: "POST",
@@ -176,6 +224,15 @@ async function runIntegrationTests() {
         body: JSON.stringify({ runId: p2Delta65535Data.runId })
       })
     ).json();
+
+    if (
+      !p2Delta65535Rec.postRecoveryExplore ||
+      p2Delta65535Rec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      !p2Delta65535Rec.postRecoveryExplore.verified
+    ) {
+      throw new Error(`Post-recovery bounded search failed for delta 65535: ${JSON.stringify(p2Delta65535Rec.postRecoveryExplore)}`);
+    }
+    console.log(`     ✓ Post-recovery bounded search verified 0 loss paths on state s_R: ${p2Delta65535Rec.postRecoveryExplore.status}`);
 
     if (p2Delta65535Rec.totalTxsExecuted !== 1) {
       throw new Error(`Expected 1 transaction for delta 65535 but got ${p2Delta65535Rec.totalTxsExecuted}`);
@@ -210,6 +267,15 @@ async function runIntegrationTests() {
       })
     ).json();
 
+    if (
+      !p2Delta65536Rec.postRecoveryExplore ||
+      p2Delta65536Rec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      !p2Delta65536Rec.postRecoveryExplore.verified
+    ) {
+      throw new Error(`Post-recovery bounded search failed for delta 65536: ${JSON.stringify(p2Delta65536Rec.postRecoveryExplore)}`);
+    }
+    console.log(`     ✓ Post-recovery bounded search verified 0 loss paths on state s_R: ${p2Delta65536Rec.postRecoveryExplore.status}`);
+
     if (p2Delta65536Rec.totalTxsExecuted !== 2) {
       throw new Error(`Expected 2 chunked transactions for delta 65536 but got ${p2Delta65536Rec.totalTxsExecuted}`);
     }
@@ -226,7 +292,7 @@ async function runIntegrationTests() {
     console.log("     ✓ Exploit replay reverted with InvalidNonce on Permit2");
 
     // 6. Adversarial Test 5: Unknown scenarioId rejection (Fail-closed API)
-    console.log("\n[6/6] Adversarial Test 5: Unknown scenarioId rejection (Fail Closed)...");
+    console.log("\n[6/7] Adversarial Test 5: Unknown scenarioId rejection (Fail Closed)...");
     const garbageRes = await fetch(`${BASE_URL}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -241,6 +307,69 @@ async function runIntegrationTests() {
       throw new Error(`Expected error message mentioning Unsupported scenario: garbage, got ${JSON.stringify(garbageData)}`);
     }
     console.log(`  ✓ Unknown scenario 'garbage' successfully rejected with HTTP 400 Bad Request: "${garbageData.error}"`);
+
+    // 7. Test Arbitrary Capability API (/api/analyze-capability)
+    console.log("\n[7/7] Testing Arbitrary Capability API (/api/analyze-capability)...");
+
+    // Subtest 7A: Cryptographic rejection of tampered signature / forged authority
+    console.log("  -> Subtest 7A: Forged cryptographic authority rejection (Fail Closed)...");
+    const forgedRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          delegateAddress: "0x1111111111111111111111111111111111111111",
+          chainId: 31337,
+          nonce: 0,
+          yParity: 0,
+          r: "0x1234567890123456789012345678901234567890123456789012345678901234",
+          s: "0x1234567890123456789012345678901234567890123456789012345678901234"
+        }
+      })
+    });
+    if (!forgedRes.ok) throw new Error(`POST /api/analyze-capability failed: ${await forgedRes.text()}`);
+    const forgedData = await forgedRes.json();
+    if (forgedData.status !== "INVALID_CAPABILITY" || forgedData.valid !== false) {
+      throw new Error(`Expected INVALID_CAPABILITY for forged payload, got ${JSON.stringify(forgedData)}`);
+    }
+    console.log(`     ✓ Forged signature rejected: status=${forgedData.status}, reason="${forgedData.reason}"`);
+
+    // Subtest 7B: Cryptographic acceptance of valid signed EIP-7702 tuple
+    console.log("  -> Subtest 7B: Valid cryptographic signature verification & reachability analysis...");
+    const testAccount = privateKeyToAccount("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+    const validAuth = await signAuthorization(
+      createPublicClient({ transport: viemHttp("http://127.0.0.1:8545") }),
+      {
+        account: testAccount,
+        contractAddress: "0x0000000000000000000000000000000000000000",
+        chainId: 31337,
+        nonce: 0
+      }
+    );
+    const validRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: validAuth.address,
+          chainId: validAuth.chainId,
+          nonce: validAuth.nonce,
+          yParity: validAuth.yParity,
+          r: validAuth.r,
+          s: validAuth.s
+        }
+      })
+    });
+    if (!validRes.ok) throw new Error(`POST /api/analyze-capability failed: ${await validRes.text()}`);
+    const validData = await validRes.json();
+    if (!validData.valid || (validData.status !== "NO_MODELED_LOSS" && validData.status !== "UNMODELED")) {
+      throw new Error(`Expected valid outcome for authenticated capability, got ${JSON.stringify(validData)}`);
+    }
+    console.log(`     ✓ Authenticated capability verified: status=${validData.status}, valid=${validData.valid}, signer=${validData.signer}`);
 
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");
