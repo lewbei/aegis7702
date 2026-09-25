@@ -767,10 +767,11 @@ async function handleRecover(body: any): Promise<any> {
       }
       case "CLEAR_DELEGATION": {
         const currentVictimNonce = await publicClient.getTransactionCount({ address: victim });
+        const chainId = recoveryPlan.recoveryDelegation?.chainId ?? (await publicClient.getChainId());
         const recoveryAuth = await signAuthorization(publicClient, {
           account: victimAccount,
           contractAddress: "0x0000000000000000000000000000000000000000",
-          chainId: 31337,
+          chainId,
           nonce: currentVictimNonce + 1
         });
         txHash = await victimWallet.sendTransaction({
