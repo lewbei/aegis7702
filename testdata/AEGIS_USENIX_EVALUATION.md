@@ -92,7 +92,7 @@
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths proven on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Real contract executed without loss under bounded model |
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
-| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Missed all 51 executable-loss cases because signing produces zero immediate balance delta |
+| **Structural B₀ Immediate-Delta Comparator** | **51 / 51 ($0.00 delta)** | Evaluated zero immediate tracked-asset loss at Step 0 for all 51 executable-loss cases |
 | **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
 | **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 51/51 replayed witnesses produced zero tracked loss after recovery; replay may revert or execute as a harmless no-op. |
 | **Controlled Negative Sanity Checks** | **4 / 4** | 4/4 produced no loss witness across protocol-negative controls |

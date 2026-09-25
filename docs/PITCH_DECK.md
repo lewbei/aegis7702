@@ -34,7 +34,7 @@
 - **The Comparator:** Our $B_0$ comparator evaluates only immediate balance change at signing:
   $$\text{Safe}(s_0, \text{tx}) \iff \Delta \text{Balance}(s_0) \ge -\epsilon$$
 - **The Blindspot:** Because detached EIP-7702 authorizations and Permit2 signatures produce zero on-chain balance delta at the point of signing ($\Delta = \$0.00$), $B_0$ inevitably evaluates the capability as safe and misses the later reachable drain.
-- **Empirical Confirmation:** In our 58-case USENIX benchmark, $B_0$ suffered a 100% false-negative rate on executable loss cases (51/51).
+- **Empirical Confirmation:** In our 58-case USENIX benchmark, $B_0$ observed $0.00 immediate tracked loss at Step 0 across all 51 executable-loss cases.
 - **What is Needed:** Not another static blacklist or probabilistic "AI risk score", but a **dynamic reachability search** over future attacker-controlled state transitions.
 
 | Dimension | Single-Step Immediate-Delta ($B_0$) | Aegis7702 Reachability Engine |
@@ -127,7 +127,7 @@ Evaluated against the complete intersection of EOA detections and sensitive func
 | **Exploit Witnesses Discovered** | **51 / 58 (87.9%)** | Concrete multi-step EVM loss witnesses proven |
 | **Explored Without Loss** | **6 / 58 (10.3%)** | Real bytecodes requiring unmodeled state/preconditions |
 | **Unmodeled Interface** | **1 / 58 (1.7%)** | Unsupported interface reported honestly |
-| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Baseline missed all 51 executable loss cases |
+| **Structural B₀ Immediate-Delta Comparator** | **51 / 51 ($0.00 delta)** | Evaluated zero immediate tracked-asset loss at Step 0 across all 51 cases |
 | **Clean-State Witness Replay** | **51 / 51 (100%)** | 100% loss reproducibility on fresh EVM snapshots |
 | **Post-Recovery Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L=0$) |
 | **Controlled Negative Sanity Checks** | **4 / 4** | 4/4 produced no loss witness on safe/guarded EOAs |

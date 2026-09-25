@@ -422,7 +422,7 @@ export async function runUsenixEvaluation() {
   console.log(`    - Explored Without Loss (NO_MODELED_LOSS):     ${noModeledLossCount} / ${realCases.length} (${((noModeledLossCount / realCases.length) * 100).toFixed(1)}%)`);
   console.log(`    - Unmodeled Interfaces (UNMODELED):            ${unmodeledCount} / ${realCases.length}`);
   console.log(`  ------------------------------------------------------------------------------`);
-  console.log(`  Immediate-Delta Baseline Miss Rate:              ${foundLossCount} / ${foundLossCount} (100% false-negative rate on confirmed cases; signing produces zero immediate delta)`);
+  console.log(`  Structural B0 Comparator:                       ${foundLossCount} / ${foundLossCount} executable-loss cases had $0.00 immediate tracked loss at Step 0`);
   console.log(`  Clean-State Witness Replay Success:              ${replayedWitnesses} / ${foundLossCount} (100% Concrete Reproducibility)`);
   console.log(`  Post-Recovery Exploit Neutralization Rate:       ${recoveryBlockedCount} / ${foundLossCount} (100% Verified Mitigations)`);
   console.log(`  Controlled Negative Sanity Checks:               ${negCorrectCount} / ${negCases.length} (4/4 produced no loss witness across protocol-negative controls)`);
@@ -468,7 +468,7 @@ export async function runUsenixEvaluation() {
 | **Exploit Witnesses Discovered (\`FOUND_LOSS\`)** | **${foundLossCount} / ${realCases.length} (${((foundLossCount / realCases.length) * 100).toFixed(1)}%)** | Concrete multi-step loss paths proven on EVM state |
 | **Explored Without Loss (\`NO_MODELED_LOSS\`)** | **${noModeledLossCount} / ${realCases.length} (${((noModeledLossCount / realCases.length) * 100).toFixed(1)}%)** | Real contract executed without loss under bounded model |
 | **Unmodeled Delegated Interfaces (\`UNMODELED\`)** | **${unmodeledCount} / ${realCases.length} (${((unmodeledCount / realCases.length) * 100).toFixed(1)}%)** | Honest identification of out-of-scope contract semantics |
-| **Immediate-Delta Baseline Miss Rate** | **${foundLossCount} / ${foundLossCount} (100%)** | Missed all ${foundLossCount} executable-loss cases because signing produces zero immediate balance delta |
+| **Structural B₀ Immediate-Delta Comparator** | **${foundLossCount} / ${foundLossCount} ($0.00 delta)** | Evaluated zero immediate tracked-asset loss at Step 0 for all ${foundLossCount} executable-loss cases |
 | **Clean-State Witness Replay Success** | **${replayedWitnesses} / ${foundLossCount} (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
 | **Post-Recovery Exploit Neutralization** | **${recoveryBlockedCount} / ${foundLossCount} (100%)** | 51/51 replayed witnesses produced zero tracked loss after recovery; replay may revert or execute as a harmless no-op. |
 | **Controlled Negative Sanity Checks** | **${negCorrectCount} / ${negCases.length}** | 4/4 produced no loss witness across protocol-negative controls |

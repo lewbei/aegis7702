@@ -2,25 +2,197 @@ import { encodeFunctionData, PublicClient, Address } from "viem";
 import { Action, ActionEnumeration, EIP7702Capability } from "../capability/types.js";
 import { ERC20_ABI } from "../capability/abis.js";
 
+export interface ModeledDrainFamily {
+  id: string;
+  name: string;
+  selector: string;
+  buildActions: (params: {
+    owner: Address;
+    attacker: Address;
+    token: Address;
+    victimBalance: bigint;
+  }) => Action[];
+}
+
+export const MODELED_DRAIN_FAMILIES: readonly ModeledDrainFamily[] = [
+  {
+    id: "MaliciousDelegate.sweep",
+    name: "sweep(address,address)",
+    selector: "b8dc491b",
+    buildActions: ({ owner, attacker, token, victimBalance }) => [
+      {
+        id: "MaliciousDelegate.sweep",
+        description: `Attacker calls sweep(${token}, ${attacker}) on victim EOA context to drain ${victimBalance} tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "sweep",
+              inputs: [
+                { name: "token", type: "address" },
+                { name: "to", type: "address" }
+              ],
+              outputs: []
+            }
+          ],
+          functionName: "sweep",
+          args: [token, attacker]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  },
+  {
+    id: "MaliciousDelegate.sweepArray",
+    name: "sweep(address[])",
+    selector: "780469bb",
+    buildActions: ({ owner, attacker, token }) => [
+      {
+        id: "MaliciousDelegate.sweepArray",
+        description: `Attacker calls sweep([${token}]) on victim EOA context to drain tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "sweep",
+              inputs: [{ name: "tokens", type: "address[]" }],
+              outputs: []
+            }
+          ],
+          functionName: "sweep",
+          args: [[token]]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  },
+  {
+    id: "MaliciousDelegate.drainToken",
+    name: "drainToken(address,uint256)",
+    selector: "9d4323be",
+    buildActions: ({ owner, attacker, token, victimBalance }) => [
+      {
+        id: "MaliciousDelegate.drainToken",
+        description: `Attacker calls drainToken(${token}, ${victimBalance}) on victim EOA context to drain tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "drainToken",
+              inputs: [
+                { name: "token", type: "address" },
+                { name: "amount", type: "uint256" }
+              ],
+              outputs: []
+            }
+          ],
+          functionName: "drainToken",
+          args: [token, victimBalance]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  },
+  {
+    id: "MaliciousDelegate.sweepERC20",
+    name: "sweepERC20(address)",
+    selector: "e00af4a7",
+    buildActions: ({ owner, attacker, token }) => [
+      {
+        id: "MaliciousDelegate.sweepERC20",
+        description: `Attacker calls sweepERC20(${token}) on victim EOA context to drain tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "sweepERC20",
+              inputs: [{ name: "token", type: "address" }],
+              outputs: []
+            }
+          ],
+          functionName: "sweepERC20",
+          args: [token]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  },
+  {
+    id: "MaliciousDelegate.sweepTokens",
+    name: "sweepTokens(address)",
+    selector: "f5f6d3af",
+    buildActions: ({ owner, attacker, token }) => [
+      {
+        id: "MaliciousDelegate.sweepTokens",
+        description: `Attacker calls sweepTokens(${token}) on victim EOA context to drain tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "sweepTokens",
+              inputs: [{ name: "token", type: "address" }],
+              outputs: []
+            }
+          ],
+          functionName: "sweepTokens",
+          args: [token]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  },
+  {
+    id: "MaliciousDelegate.sweepTokensAmount",
+    name: "sweepTokens(address,uint256)",
+    selector: "dec66036",
+    buildActions: ({ owner, attacker, token, victimBalance }) => [
+      {
+        id: "MaliciousDelegate.sweepTokensAmount",
+        description: `Attacker calls sweepTokens(${token}, ${victimBalance}) on victim EOA context to drain tokens`,
+        target: owner,
+        calldata: encodeFunctionData({
+          abi: [
+            {
+              type: "function",
+              name: "sweepTokens",
+              inputs: [
+                { name: "token", type: "address" },
+                { name: "amount", type: "uint256" }
+              ],
+              outputs: []
+            }
+          ],
+          functionName: "sweepTokens",
+          args: [token, victimBalance]
+        }),
+        value: 0n,
+        actor: attacker
+      }
+    ]
+  }
+] as const;
+
 export class EIP7702Semantics {
   /**
    * The canonical 6 malicious delegate interface families supported by v1.0 EIP-7702 semantics:
-   * 1. sweep(address,address) [0xb8dc491b / 0x89afcb44]
+   * 1. sweep(address,address) [0xb8dc491b]
    * 2. sweep(address[]) [0x780469bb]
    * 3. drainToken(address,uint256) [0x9d4323be]
    * 4. sweepERC20(address) [0xe00af4a7]
    * 5. sweepTokens(address) [0xf5f6d3af]
    * 6. sweepTokens(address,uint256) [0xdec66036]
    */
-  static readonly MODELED_SELECTORS = [
-    "b8dc491b", // sweep(address,address)
-    "89afcb44", // sweep(address,address) alternate
-    "780469bb", // sweep(address[])
-    "9d4323be", // drainToken(address,uint256)
-    "e00af4a7", // sweepERC20(address)
-    "f5f6d3af", // sweepTokens(address)
-    "dec66036", // sweepTokens(address,uint256)
-  ] as const;
+  static readonly MODELED_SELECTORS: readonly string[] = MODELED_DRAIN_FAMILIES.map((f) => f.selector);
 
   static async enumerateActions(
     capability: EIP7702Capability,
@@ -96,152 +268,10 @@ export class EIP7702Semantics {
 
     if (hasDelegation && token && victimBalance > 0n) {
       const delegateCode = ((await client.getBytecode({ address: delegateAddress })) || "").toLowerCase();
-
-      // Interface 1: sweep(address,address)
-      if (delegateCode.includes("b8dc491b") || delegateCode.includes("89afcb44")) {
-        actions.push({
-          id: "MaliciousDelegate.sweep",
-          description: `Attacker calls sweep(${token}, ${attacker}) on victim EOA context to drain ${victimBalance} tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "sweep",
-                inputs: [
-                  { name: "token", type: "address" },
-                  { name: "to", type: "address" }
-                ],
-                outputs: []
-              }
-            ],
-            functionName: "sweep",
-            args: [token, attacker]
-          }),
-          value: 0n,
-          actor: attacker
-        });
-      }
-
-      // Interface 2: sweep(address[])
-      if (delegateCode.includes("780469bb")) {
-        actions.push({
-          id: "MaliciousDelegate.sweepArray",
-          description: `Attacker calls sweep([${token}]) on victim EOA context to drain tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "sweep",
-                inputs: [{ name: "tokens", type: "address[]" }],
-                outputs: []
-              }
-            ],
-            functionName: "sweep",
-            args: [[token]]
-          }),
-          value: 0n,
-          actor: attacker
-        });
-      }
-
-      // Interface 3: drainToken(address,uint256)
-      if (delegateCode.includes("9d4323be")) {
-        actions.push({
-          id: "MaliciousDelegate.drainToken",
-          description: `Attacker calls drainToken(${token}, ${victimBalance}) on victim EOA context to drain tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "drainToken",
-                inputs: [
-                  { name: "token", type: "address" },
-                  { name: "amount", type: "uint256" }
-                ],
-                outputs: []
-              }
-            ],
-            functionName: "drainToken",
-            args: [token, victimBalance]
-          }),
-          value: 0n,
-          actor: attacker
-        });
-      }
-
-      // Interface 4: sweepERC20(address)
-      if (delegateCode.includes("e00af4a7")) {
-        actions.push({
-          id: "MaliciousDelegate.sweepERC20",
-          description: `Attacker calls sweepERC20(${token}) on victim EOA context to drain tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "sweepERC20",
-                inputs: [{ name: "token", type: "address" }],
-                outputs: []
-              }
-            ],
-            functionName: "sweepERC20",
-            args: [token]
-          }),
-          value: 0n,
-          actor: attacker
-        });
-      }
-
-      // Interface 5: sweepTokens(address)
-      if (delegateCode.includes("f5f6d3af")) {
-        actions.push({
-          id: "MaliciousDelegate.sweepTokens",
-          description: `Attacker calls sweepTokens(${token}) on victim EOA context to drain tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "sweepTokens",
-                inputs: [{ name: "token", type: "address" }],
-                outputs: []
-              }
-            ],
-            functionName: "sweepTokens",
-            args: [token]
-          }),
-          value: 0n,
-          actor: attacker
-        });
-      }
-
-      // Interface 6: sweepTokens(address,uint256)
-      if (delegateCode.includes("dec66036")) {
-        actions.push({
-          id: "MaliciousDelegate.sweepTokensAmount",
-          description: `Attacker calls sweepTokens(${token}, ${victimBalance}) on victim EOA context to drain tokens`,
-          target: owner,
-          calldata: encodeFunctionData({
-            abi: [
-              {
-                type: "function",
-                name: "sweepTokens",
-                inputs: [
-                  { name: "token", type: "address" },
-                  { name: "amount", type: "uint256" }
-                ],
-                outputs: []
-              }
-            ],
-            functionName: "sweepTokens",
-            args: [token, victimBalance]
-          }),
-          value: 0n,
-          actor: attacker
-        });
+      for (const family of MODELED_DRAIN_FAMILIES) {
+        if (delegateCode.includes(family.selector)) {
+          actions.push(...family.buildActions({ owner, attacker, token, victimBalance }));
+        }
       }
     }
 

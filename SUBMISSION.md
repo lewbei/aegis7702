@@ -1,7 +1,7 @@
 # Aegis7702: Bounded Capability-Reachability Verifier & Recovery Engine
 
 **Project Name:** Aegis7702  
-**Tagline / Elevator Pitch:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified 1-click on-chain recovery.
+**Tagline / Elevator Pitch:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability in a local EVM environment and synthesizes verified 1-click on-chain recovery.
 
 ---
 
@@ -46,7 +46,7 @@ Instead of outputting ambiguous, probabilistic "AI risk scores", Aegis7702 execu
    - *Active EIP-7702 Delegation:* Constructs an EIP-7702 Type-4 transaction with authorization pointing to `address(0)` to wipe the `0xef0100...` delegation indicator back to a clean EOA.
    - *Permit2 Allowance:* Calls canonical `Permit2.invalidateNonces()` to bump nonces past signed nonces before broadcast, or `Permit2.lockdown()` to zero active allowances.
    - *Permit2 Signature:* Calls `Permit2.invalidateUnorderedNonces(wordPos, mask)` to flip the bitmap word position, neutralizing the signature.
-5. **Deterministic On-Fork Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery fork state $s_R$ and proves on-chain that the exploit is neutralized, causing zero tracked asset loss:
+5. **Deterministic Replay Verification:** Replays the identical attacker exploit trace $\pi$ against the post-recovery state $s_R$ and proves on-chain that the exploit is neutralized, causing zero tracked asset loss:
    $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad \land \quad L(s_R, T_\pi(s_R)) = 0}$$
    In execution semantics, this condition is satisfied when the replayed exploit trace either explicitly reverts on-chain (e.g., Permit2 nonce invalidation reverting with `InvalidNonce`) or executes harmlessly with zero tracked asset loss (e.g., EIP-7702 authorization skipped due to nonce mismatch, causing delegated drain calls to revert or become harmless no-ops on a clean EOA). Tracked asset balances remain completely unchanged under the replayed trace.
 
@@ -70,7 +70,7 @@ We implemented a unified, robust, and reproducible three-tier architecture:
 │   └── src/server.ts           # HTTP API server bridging engine execution directly to the web dashboard
 │
 └── app/                        # Interactive Visualizer Dashboard (React 19 + Vite 8)
-    └── src/                    # Live Anvil RPC integration, baseline contrast, 1-click on-fork recovery
+    └── src/                    # Live Anvil RPC integration, baseline contrast, 1-click on-chain recovery
 ```
 
 * **Solidity Smart Contracts & Foundry Suite:**
@@ -88,7 +88,7 @@ We implemented a unified, robust, and reproducible three-tier architecture:
   - Built a lightweight HTTP backend server (`server.ts`) exposing `/api/analyze`, `/api/recover`, and `/api/replay` for real-time frontend execution on live ephemeral Anvil instances.
 * **Interactive Prototype Dashboard:**
   - Built with React 19, Vite 8, Lucide, and Tailwind CSS.
-  - Connects directly to the live Anvil engine server, displaying the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and real on-fork recovery execution with live transaction hashes.
+  - Connects directly to the live Anvil engine server, displaying the immediate-delta baseline verdict (`SAFE ✅, Δ = $0.00`) side-by-side with Aegis7702 reachability graph analysis (`CRITICAL EXPLOIT DETECTED 🔴`), interactive trace exploration, and real on-chain recovery execution with live transaction hashes.
 * **Sepolia Testnet Deployment Script:**
   - Authored Foundry script `contracts/script/DeploySentinel.s.sol` to deploy `Guard7702Sentinel` and `MaliciousDelegate` on any public EVM network:
     ```bash
@@ -117,7 +117,7 @@ We evaluated the **full inclusion set of all 58 chain-address cases (53 unique d
 | **Exploit Witnesses Discovered (`FOUND_LOSS`)** | **51 / 58 (87.9%)** | Concrete multi-step loss paths discovered on EVM state |
 | **Explored Without Loss (`NO_MODELED_LOSS`)** | **6 / 58 (10.3%)** | Delegate executed without triggering loss under bounded model |
 | **Unmodeled Delegated Interfaces (`UNMODELED`)** | **1 / 58 (1.7%)** | Honest identification of out-of-scope contract semantics |
-| **Immediate-Delta Baseline Miss Rate** | **51 / 51 (100%)** | Missed all 51 executable-loss cases because signing produces zero immediate balance delta |
+| **Structural B₀ Immediate-Delta Comparator** | **51 / 51 ($0.00 delta)** | Evaluated zero immediate tracked-asset loss at Step 0 for all 51 executable-loss cases |
 | **Clean-State Witness Replay Success** | **51 / 51 (100%)** | 100% of discovered counterexamples caused real loss on fresh snapshot replay |
 | **Post-Recovery Exploit Neutralization** | **51 / 51 (100%)** | 100% of replayed exploits neutralized ($L(s_R) = 0$ via on-chain revert or clean-state no-op) |
 | **Controlled Protocol-Negative Accuracy** | **4 / 4 (0 false positives)** | 0 false positives across four protocol-negative controls |
@@ -128,7 +128,7 @@ Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (f
 
 ## Adversarial Recovery & Boundary Hardening
 
-Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying boundary resilience on live Prague EVM forks:
+Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying boundary resilience in a standardized local Prague-EVM reconstruction:
 
 1. **EIP-7702 Future Nonce Attack:** When an attacker tricks a victim into signing an authorization tuple for a future nonce ($n_{\text{current}} = 5, n_{\text{auth}} = 8$), Aegis7702 calculates $\Delta = 4$ and automatically synthesizes 4 sequential self-transactions, advancing the account nonce past the stolen authorization and permanently neutralizing it.
 2. **EIP-7702 Active Delegation Clearance:** When malicious code is already actively installed (`0xef0100...`), Aegis7702 synthesizes a Type-4 transaction with authorization pointing to `address(0)` signed with `currentNonce + 1`, resetting the account bytecode back to a clean EOA (`0x`) and proving on-chain that subsequent attacker calls revert.
@@ -163,7 +163,7 @@ Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying bou
 3. **Formal Mathematical Grounding:**
    Directly addressing the USENIX Security 2026 empirical dataset and grounding the authorization architecture in the **Key Sovereignty** framework of Matthias Hauser (arXiv:2605.01210).
 4. **Interactive Prototype Dashboard:**
-   A high-fidelity, interactive dashboard built in Vite with zero TypeScript compilation errors, allowing technical judges and end users to visually contrast single-step simulation against downstream reachability and trigger 1-click on-fork mitigations.
+   A high-fidelity, interactive dashboard built in Vite with zero TypeScript compilation errors, allowing technical judges and end users to visually contrast single-step simulation against downstream reachability and trigger 1-click on-chain mitigations.
 
 ---
 
