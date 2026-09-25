@@ -42,7 +42,11 @@ export function decodePermit2Signature(input: any): Permit2SignatureCapability {
     throw new Error("Invalid Permit2 PermitTransferFrom message: missing token or spender");
   }
 
-  const chainId = BigInt(domain.chainId ?? input.chainId ?? 1);
+  const rawChainId = domain?.chainId ?? input.chainId;
+  if (rawChainId === undefined || rawChainId === null || rawChainId === "") {
+    throw new Error("Invalid Permit2 capability: missing required chainId in domain or input");
+  }
+  const chainId = BigInt(rawChainId);
   const permit2Address = getAddress(domain.verifyingContract);
   const owner = getAddress(input.owner);
   const spender = getAddress(message.spender);

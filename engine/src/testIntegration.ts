@@ -898,6 +898,40 @@ async function runIntegrationTests() {
     }
     console.log(`     ✓ Missing targetToken correctly returned UNMODELED: reason="${missingTokenData.reason}"`);
 
+    // Subtest 7M: Client expected* overrides strictly rejected against session preconditions
+    console.log("  -> Subtest 7M: Client expected* parameter contradiction defense in /api/recover...");
+    const contradictSession = await (
+      await fetch(`${BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId: "eip7702" })
+      })
+    ).json();
+
+    const overrideRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: contradictSession.runId,
+        expectedAccountNonce: 999999 // Contradicts session precondition
+      })
+    });
+    if (overrideRecoverRes.status !== 409) {
+      throw new Error(`Expected HTTP 409 Conflict when client contradicts authoritative precondition, got HTTP ${overrideRecoverRes.status}`);
+    }
+    const overrideRecoverData = await overrideRecoverRes.json();
+    if (overrideRecoverData.status !== "STATE_PRECONDITION_FAILED" || !overrideRecoverData.reason.includes("contradicts authoritative session precondition")) {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED with contradiction reason, got ${JSON.stringify(overrideRecoverData)}`);
+    }
+    console.log(`     ✓ Client expected* contradiction defense passed: ${overrideRecoverData.reason}`);
+
+    // Clean up contradictSession
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: contradictSession.runId })
+    });
+
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");
     console.log("================================================================================\n");

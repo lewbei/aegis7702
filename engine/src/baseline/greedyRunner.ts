@@ -10,7 +10,9 @@ import {
   InvariantOracle,
   ERC20LossOracle,
   BuiltinCapabilityActionProvider,
-  SearchTelemetry
+  SearchTelemetry,
+  TransactionRevertedError,
+  isEvmRevertError
 } from "../search/explorer.js";
 
 export interface AnvilRpcClient {
@@ -179,13 +181,20 @@ export class StateAwareGreedyRunner {
       }
       return { status: "TRACE_BLOCKED" };
     } catch (err: any) {
-      return { status: "TRACE_BLOCKED", error: err.message || String(err) };
+      if (err instanceof TransactionRevertedError || isEvmRevertError(err)) {
+        return { status: "TRACE_BLOCKED", error: err.message || String(err) };
+      }
+      throw err; // Fail-closed on infrastructure / RPC failure
     }
   }
 
   private async executeAction(action: Action): Promise<void> {
-    await this.rpcClient.request({ method: "anvil_impersonateAccount", params: [action.actor] });
-    await this.rpcClient.request({ method: "anvil_setBalance", params: [action.actor, "0xde0b6b3a7640000"] });
+    try {
+      await this.rpcClient.request({ method: "anvil_impersonateAccount", params: [action.actor] });
+      await this.rpcClient.request({ method: "anvil_setBalance", params: [action.actor, "0xde0b6b3a7640000"] });
+    } catch (err: any) {
+      throw new Error(`RPC infrastructure error during actor preparation for [${action.id}]: ${err.message || err}`);
+    }
 
     const txParams: any = {
       from: action.actor,
@@ -197,14 +206,28 @@ export class StateAwareGreedyRunner {
       txParams.authorizationList = action.authorizationList;
     }
 
-    const txHash: Hash = await this.rpcClient.request({
-      method: "eth_sendTransaction",
-      params: [txParams]
-    });
+    let txHash: Hash;
+    try {
+      txHash = await this.rpcClient.request({
+        method: "eth_sendTransaction",
+        params: [txParams]
+      });
+    } catch (err: any) {
+      if (isEvmRevertError(err)) {
+        throw new TransactionRevertedError(action.id, "reverted", err.message);
+      }
+      throw new Error(`RPC transport failure dispatching transaction for [${action.id}]: ${err.message || err}`);
+    }
 
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    let receipt: any;
+    try {
+      receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    } catch (err: any) {
+      throw new Error(`RPC timeout or transport error waiting for receipt [${action.id}]: ${err.message || err}`);
+    }
+
     if (receipt.status !== "success") {
-      throw new Error(`Transaction ${action.id} reverted on-chain (status: ${receipt.status})`);
+      throw new TransactionRevertedError(action.id, receipt.status);
     }
   }
 }

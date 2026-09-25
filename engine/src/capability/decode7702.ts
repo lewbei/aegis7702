@@ -31,12 +31,20 @@ export function decode7702(input: RawEIP7702AuthorizationInput & { delegateAddre
   const chainId = BigInt(input.chainId);
   const nonce = BigInt(input.nonce);
 
-  let yParity = 0;
+  if (input.yParity === undefined && input.v === undefined) {
+    throw new Error("Invalid EIP-7702 authorization: missing required yParity or v signature component");
+  }
+
+  let yParity: number;
   if (input.yParity !== undefined) {
     yParity = Number(input.yParity);
-  } else if (input.v !== undefined) {
+  } else {
     const vNum = Number(input.v);
     yParity = vNum >= 27 ? vNum - 27 : vNum;
+  }
+
+  if (yParity !== 0 && yParity !== 1) {
+    throw new Error(`Invalid EIP-7702 authorization: yParity must be 0 or 1, got ${yParity}`);
   }
 
   const targetToken = input.targetToken ? getAddress(input.targetToken) : undefined;

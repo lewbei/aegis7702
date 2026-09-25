@@ -203,9 +203,22 @@ async function replayTraceAgainstStateSnapshot(
             break;
           }
         }
-      } catch {
-        // Transaction execution rejected or reverted by EVM
-        break;
+      } catch (err: any) {
+        const msg = String(err?.message || err).toLowerCase();
+        const isEvmRevert =
+          msg.includes("revert") ||
+          msg.includes("reverted") ||
+          msg.includes("nonce") ||
+          msg.includes("invalid authorization") ||
+          msg.includes("out of gas") ||
+          err?.name === "TransactionExecutionError" ||
+          err?.name === "EstimateGasExecutionError";
+        if (isEvmRevert) {
+          // Transaction execution rejected or reverted by EVM rules
+          break;
+        }
+        // Generic send/RPC/infrastructure exception: rethrow to outer catch block to fail closed!
+        throw err;
       }
     }
 

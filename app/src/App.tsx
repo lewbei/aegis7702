@@ -354,8 +354,14 @@ export function App() {
         setIsRecovering(false);
         setRecoveryDone(true);
         return;
-      } catch {
-        // Fallback if request drops
+      } catch (err: any) {
+        setIsRecovering(false);
+        setRecoveryDone(true);
+        setRealReplayResult({
+          mitigated: false,
+          message: `Network error executing recovery: ${err.message || err}`
+        });
+        return;
       }
     }
 
@@ -714,54 +720,69 @@ export function App() {
                   </div>
 
                   {recoveryDone && (
-                    <div className={`mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 ${
-                      activeRunId && realRecoveryTx
-                        ? "bg-emerald-950/30 border border-emerald-500/40"
-                        : "bg-slate-950/60 border border-slate-700/60"
-                    }`}>
-                      <div className="flex items-center gap-2 font-semibold text-sm">
-                        {activeRunId && realRecoveryTx ? (
-                          <>
-                            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                            <span className="text-emerald-400">Mitigation Verified: Exploit Neutralized (Zero Tracked Loss)!</span>
-                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto font-mono">
-                              Live Anvil Confirmed
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-5 h-5 text-cyan-400" />
-                            <span className="text-slate-200">Precomputed Verification: Exploit Neutralized (Zero Tracked Loss)</span>
-                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-auto font-mono">
-                              Recorded Fixture
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-300 font-mono space-y-1">
-                        {realRecoveryTx ? (
-                          <div className="text-cyan-300 truncate">
-                            Recovery Tx Hash: <span className="font-bold">{realRecoveryTx.txHash}</span> (Gas Used: {realRecoveryTx.gasUsed})
-                          </div>
-                        ) : (
-                          <div className="text-slate-400 italic">
-                            Recorded recovery transaction calldata verified against local Anvil fork
-                          </div>
-                        )}
-                        <div>
-                          Attacker Replay Status:{" "}
-                          <span className="text-rose-400 font-bold">
-                            REVERTED ({realReplayResult?.revertError || scenario.recovery.replayResult.errorSignature})
+                    realReplayResult && !realReplayResult.mitigated ? (
+                      <div className="mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 bg-rose-950/30 border border-rose-500/40">
+                        <div className="flex items-center gap-2 font-semibold text-sm text-rose-400">
+                          <AlertTriangle className="w-5 h-5 text-rose-400" />
+                          <span>Recovery Aborted / Precondition Violation</span>
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 ml-auto font-mono">
+                            Safety Defense Triggered
                           </span>
                         </div>
-                        <div>
-                          Victim Tracked Balance:{" "}
-                          <span className="text-emerald-400 font-bold">
-                            {realReplayResult?.finalVictimBalance || scenario.recovery.replayResult.preservedBalance}
-                          </span>
+                        <div className="text-xs text-rose-200 font-mono">
+                          {realReplayResult.message || "State precondition conflict: on-chain state diverged."}
                         </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className={`mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 ${
+                        activeRunId && realRecoveryTx
+                          ? "bg-emerald-950/30 border border-emerald-500/40"
+                          : "bg-slate-950/60 border border-slate-700/60"
+                      }`}>
+                        <div className="flex items-center gap-2 font-semibold text-sm">
+                          {activeRunId && realRecoveryTx ? (
+                            <>
+                              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                              <span className="text-emerald-400">Mitigation Verified: Exploit Neutralized (Zero Tracked Loss)!</span>
+                              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto font-mono">
+                                Live Anvil Confirmed
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+                              <span className="text-slate-200">Precomputed Verification: Exploit Neutralized (Zero Tracked Loss)</span>
+                              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-auto font-mono">
+                                Recorded Fixture
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-300 font-mono space-y-1">
+                          {realRecoveryTx ? (
+                            <div className="text-cyan-300 truncate">
+                              Recovery Tx Hash: <span className="font-bold">{realRecoveryTx.txHash}</span> (Gas Used: {realRecoveryTx.gasUsed})
+                            </div>
+                          ) : (
+                            <div className="text-slate-400 italic">
+                              Recorded recovery transaction calldata verified against local Anvil fork
+                            </div>
+                          )}
+                          <div>
+                            Attacker Replay Status:{" "}
+                            <span className="text-rose-400 font-bold">
+                              REVERTED ({realReplayResult?.revertError || scenario.recovery.replayResult.errorSignature})
+                            </span>
+                          </div>
+                          <div>
+                            Victim Tracked Balance:{" "}
+                            <span className="text-emerald-400 font-bold">
+                              {realReplayResult?.finalVictimBalance || scenario.recovery.replayResult.preservedBalance}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
                   )}
                 </div>
               </div>

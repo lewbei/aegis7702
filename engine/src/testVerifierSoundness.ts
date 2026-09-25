@@ -12,6 +12,8 @@ import { ERC20LossOracle, ReachabilityExplorer } from "./search/explorer.js";
 import { MultiCapabilityAuditor } from "./capability/multiAuditor.js";
 import { CapabilityValidator } from "./capability/validator.js";
 import { Permit2AllowanceCapability, Permit2SignatureCapability, EIP7702Capability, Action } from "./capability/types.js";
+import { decodePermit2Allowance } from "./capability/decodePermit2Allowance.js";
+import { decode7702 } from "./capability/decode7702.js";
 
 // Helper comparator matching evalUsenixReal
 function compareTraces(traceA: Action[], traceB: Action[]): boolean {
@@ -263,6 +265,103 @@ async function runSoundnessTests() {
     throw new Error(`CRITICAL SOUNDNESS BUG: Cap 2 must be audited with its own spender B (${attackerB}), got: ${auditedActors[1]}`);
   }
   console.log(`  ✓ MultiCapabilityAuditor correctly routed each capability to its authoritative spender: [${auditedActors.join(", ")}]`);
+
+  // -------------------------------------------------------------------------
+  // TEST 6: Core executeAction RPC/Transport Failures MUST Yield UNMODELED
+  // -------------------------------------------------------------------------
+  console.log("\n[Test 6] Infrastructure/RPC failures during action execution must yield UNMODELED...");
+  const failingActionRpc: any = {
+    request: async (args: any) => {
+      if (args.method === "evm_snapshot") return "0x1";
+      if (args.method === "evm_revert") return true;
+      if (args.method === "anvil_impersonateAccount") return true;
+      if (args.method === "anvil_setBalance") return true;
+      if (args.method === "eth_sendTransaction") {
+        throw new Error("RPC_NETWORK_ERROR: Connection dropped by EVM node");
+      }
+      return null;
+    }
+  };
+  const mockPublicClient: any = {
+    waitForTransactionReceipt: async () => {
+      throw new Error("RPC_TIMEOUT: timed out waiting for receipt");
+    }
+  };
+  class SingleActionProvider {
+    async enumerateActions() {
+      return {
+        status: "MODELED",
+        actions: [
+          {
+            id: "Test.drain",
+            description: "test drain",
+            actor: attackerA,
+            target: usdc,
+            calldata: "0xa9059cbb000000000000000000000000" as Hex,
+            value: 0n
+          }
+        ]
+      };
+    }
+  }
+  const explorerWithFailingRpc = new ReachabilityExplorer(
+    mockPublicClient,
+    failingActionRpc,
+    {
+      actionProvider: new SingleActionProvider() as any,
+      invariantOracle: {
+        snapshotInitial: async () => ({ initialBalance: 1000n }),
+        evaluate: async () => null
+      } as any
+    }
+  );
+  const resultOnFailedRpc = await explorerWithFailingRpc.explore(allowanceCap, attackerA);
+  if (resultOnFailedRpc.status !== "UNMODELED") {
+    throw new Error(`CRITICAL SOUNDNESS BUG: RPC network failure during executeAction must yield UNMODELED, got ${resultOnFailedRpc.status}`);
+  }
+  console.log(`  ✓ ReachabilityExplorer correctly returned UNMODELED on action transport failure: "${resultOnFailedRpc.reason}"`);
+
+  // -------------------------------------------------------------------------
+  // TEST 7: Strict Validation of Missing Permit2 chainId & EIP-7702 yParity/v
+  // -------------------------------------------------------------------------
+  console.log("\n[Test 7] Strict Validation of Missing chainId & yParity/v...");
+  let chainIdThrew = false;
+  try {
+    decodePermit2Allowance({
+      owner: victim,
+      domain: { verifyingContract: permit2 },
+      message: { details: { token: usdc, amount: 100, expiration: 1, nonce: 0 }, spender: attackerA, sigDeadline: 1 },
+      signature: "0x12"
+    });
+  } catch (err: any) {
+    if (err.message.includes("missing required chainId")) {
+      chainIdThrew = true;
+    }
+  }
+  if (!chainIdThrew) {
+    throw new Error("CRITICAL SOUNDNESS BUG: decodePermit2Allowance must throw on missing chainId, never default to 1!");
+  }
+  console.log("  ✓ decodePermit2Allowance strictly rejects missing chainId");
+
+  let yParityThrew = false;
+  try {
+    decode7702({
+      owner: victim,
+      address: attackerA,
+      chainId: 31337,
+      nonce: 0,
+      r: "0x0000000000000000000000000000000000000000000000000000000000000001" as Hex,
+      s: "0x0000000000000000000000000000000000000000000000000000000000000002" as Hex
+    });
+  } catch (err: any) {
+    if (err.message.includes("missing required yParity or v")) {
+      yParityThrew = true;
+    }
+  }
+  if (!yParityThrew) {
+    throw new Error("CRITICAL SOUNDNESS BUG: decode7702 must throw on missing yParity/v, never default to 0!");
+  }
+  console.log("  ✓ decode7702 strictly rejects missing yParity and v");
 
   console.log("\n==================================================================");
   console.log("🎉 ALL SOUNDNESS & EVIDENCE HARDENING TESTS PASSED!");

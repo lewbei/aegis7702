@@ -1071,12 +1071,14 @@ async function handleRecover(body: any): Promise<any> {
   const { victimWallet, publicClient, recoveryPlan, victim, canonicalId, victimAccount } = session;
 
   const authPreconditions = session.authoritativePreconditions ?? {};
-  const effectiveAccountNonce = expectedAccountNonce !== undefined ? expectedAccountNonce : authPreconditions.expectedAccountNonce;
-  const effectiveActiveDelegation = expectedActiveDelegation !== undefined ? expectedActiveDelegation : authPreconditions.expectedActiveDelegation;
-  const effectiveBytecode = expectedBytecode !== undefined ? expectedBytecode : authPreconditions.expectedBytecode;
-  const effectivePermitNonce = expectedPermitNonce !== undefined ? expectedPermitNonce : authPreconditions.expectedPermitNonce;
-  const effectiveAllowedAmount = expectedAllowedAmount !== undefined ? expectedAllowedAmount : authPreconditions.expectedAllowedAmount;
-  const effectiveNonceBitmapWord = expectedNonceBitmapWord !== undefined ? expectedNonceBitmapWord : authPreconditions.expectedNonceBitmapWord;
+  // Authoritative trust boundary: Stored session preconditions MUST take precedence
+  // over untrusted client parameters to prevent client-controlled race suppression.
+  const effectiveAccountNonce = authPreconditions.expectedAccountNonce !== undefined ? authPreconditions.expectedAccountNonce : expectedAccountNonce;
+  const effectiveActiveDelegation = authPreconditions.expectedActiveDelegation !== undefined ? authPreconditions.expectedActiveDelegation : expectedActiveDelegation;
+  const effectiveBytecode = authPreconditions.expectedBytecode !== undefined ? authPreconditions.expectedBytecode : expectedBytecode;
+  const effectivePermitNonce = authPreconditions.expectedPermitNonce !== undefined ? authPreconditions.expectedPermitNonce : expectedPermitNonce;
+  const effectiveAllowedAmount = authPreconditions.expectedAllowedAmount !== undefined ? authPreconditions.expectedAllowedAmount : expectedAllowedAmount;
+  const effectiveNonceBitmapWord = authPreconditions.expectedNonceBitmapWord !== undefined ? authPreconditions.expectedNonceBitmapWord : expectedNonceBitmapWord;
   const effectiveToken =
     token ??
     authPreconditions.token ??
@@ -1099,7 +1101,85 @@ async function handleRecover(body: any): Promise<any> {
     authPreconditions.permit2Address ??
     session.permit2Address;
 
-  // Precondition Defense against State-Race Regressions
+  // Precondition Defense against State-Race Regressions & Client Overrides
+  if (
+    expectedAccountNonce !== undefined &&
+    authPreconditions.expectedAccountNonce !== undefined &&
+    BigInt(expectedAccountNonce) !== BigInt(authPreconditions.expectedAccountNonce)
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected account nonce (${expectedAccountNonce}) contradicts authoritative session precondition (${authPreconditions.expectedAccountNonce}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
+  if (
+    expectedActiveDelegation !== undefined &&
+    authPreconditions.expectedActiveDelegation !== undefined &&
+    Boolean(expectedActiveDelegation) !== Boolean(authPreconditions.expectedActiveDelegation)
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected active delegation (${expectedActiveDelegation}) contradicts authoritative session precondition (${authPreconditions.expectedActiveDelegation}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
+  if (
+    expectedBytecode !== undefined &&
+    authPreconditions.expectedBytecode !== undefined &&
+    String(expectedBytecode).toLowerCase() !== String(authPreconditions.expectedBytecode).toLowerCase()
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected bytecode (${expectedBytecode}) contradicts authoritative session precondition (${authPreconditions.expectedBytecode}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
+  if (
+    expectedPermitNonce !== undefined &&
+    authPreconditions.expectedPermitNonce !== undefined &&
+    BigInt(expectedPermitNonce) !== BigInt(authPreconditions.expectedPermitNonce)
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected Permit2 nonce (${expectedPermitNonce}) contradicts authoritative session precondition (${authPreconditions.expectedPermitNonce}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
+  if (
+    expectedAllowedAmount !== undefined &&
+    authPreconditions.expectedAllowedAmount !== undefined &&
+    BigInt(expectedAllowedAmount) !== BigInt(authPreconditions.expectedAllowedAmount)
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected Permit2 allowed amount (${expectedAllowedAmount}) contradicts authoritative session precondition (${authPreconditions.expectedAllowedAmount}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
+  if (
+    expectedNonceBitmapWord !== undefined &&
+    authPreconditions.expectedNonceBitmapWord !== undefined &&
+    BigInt(expectedNonceBitmapWord) !== BigInt(authPreconditions.expectedNonceBitmapWord)
+  ) {
+    return {
+      runId,
+      status: "STATE_PRECONDITION_FAILED",
+      reason: `Client expected Permit2 nonce bitmap word (${expectedNonceBitmapWord}) contradicts authoritative session precondition (${authPreconditions.expectedNonceBitmapWord}). Recovery aborted.`,
+      totalTxsExecuted: 0
+    };
+  }
+
   if (effectiveAccountNonce !== undefined) {
     const actualNonce = await publicClient.getTransactionCount({ address: victim });
     if (BigInt(actualNonce) !== BigInt(effectiveAccountNonce)) {
@@ -1597,18 +1677,6 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
     throw new Error(`Unsupported capability type: ${type}`);
   }
 
-  // 1. Initial Cryptographic Signature & Authority Validation
-  const fastValidation = await CapabilityValidator.validate(capability);
-  if (!fastValidation.valid) {
-    return {
-      status: "INVALID_CAPABILITY",
-      valid: false,
-      reason: fastValidation.reason,
-      counterexample: null,
-      prospectiveRisk: null
-    };
-  }
-
   // 1. Spawn ephemeral Anvil instance for dynamic reachability analysis
   const is7702 = capability.kind === "EIP7702";
   const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
@@ -1742,8 +1810,15 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
             }
           };
         }
-      } catch {
-        // Read error or un-deployed
+      } catch (err: any) {
+        return {
+          status: "UNMODELED",
+          valid: true,
+          signer: validation.signer,
+          reason: `Failed to inspect on-chain Permit2 allowance state: ${err.message || err}`,
+          counterexample: null,
+          prospectiveRisk: null
+        };
       }
     }
 

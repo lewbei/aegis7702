@@ -14,6 +14,28 @@ export interface AnvilRpcClient {
   request(args: { method: string; params?: any[] }): Promise<any>;
 }
 
+export class TransactionRevertedError extends Error {
+  constructor(public readonly actionId: string, public readonly receiptStatus?: string, public readonly details?: string) {
+    super(`Transaction [${actionId}] reverted on-chain (status: ${receiptStatus || "reverted"})${details ? `: ${details}` : ""}`);
+    this.name = "TransactionRevertedError";
+  }
+}
+
+export function isEvmRevertError(err: any): boolean {
+  if (err instanceof TransactionRevertedError) return true;
+  const msg = String(err?.message || err).toLowerCase();
+  return (
+    msg.includes("revert") ||
+    msg.includes("reverted") ||
+    msg.includes("nonce") ||
+    msg.includes("invalid authorization") ||
+    msg.includes("out of gas") ||
+    msg.includes("intrinsic gas too low") ||
+    err?.name === "TransactionExecutionError" ||
+    err?.name === "EstimateGasExecutionError"
+  );
+}
+
 export type ActionEnumeration =
   | {
       status: "MODELED";
@@ -396,10 +418,19 @@ export class ReachabilityExplorer {
         await this.executeAction(action);
         this.telemetry.successfulActions++;
       } catch (err: any) {
-        this.telemetry.revertingActions++;
-        console.log(`       -> Action [${action.id}] reverted: ${err.message || err}`);
-        await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
-        continue;
+        if (err instanceof TransactionRevertedError || isEvmRevertError(err)) {
+          this.telemetry.revertingActions++;
+          console.log(`       -> Action [${action.id}] reverted: ${err.message || err}`);
+          await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
+          continue;
+        }
+        // Infrastructure / transport / RPC failure: fail-closed with UNMODELED.
+        // NEVER treat infrastructure errors as candidate reverts or fall through to NO_MODELED_LOSS!
+        await this.rpcClient.request({ method: "evm_revert", params: [snapshot] }).catch(() => {});
+        return {
+          status: "UNMODELED",
+          reason: `Action [${action.id}] execution failed due to environment/RPC error: ${err.message || err}`
+        };
       }
 
       // 3. Inspect state after action execution via injected InvariantOracle
@@ -476,19 +507,22 @@ export class ReachabilityExplorer {
   }
 
   private async executeAction(action: Action): Promise<void> {
-    // Impersonate the actor on Anvil
-    await this.rpcClient.request({
-      method: "anvil_impersonateAccount",
-      params: [action.actor]
-    });
+    // 1. Prepare actor account on Anvil (infrastructure)
+    try {
+      await this.rpcClient.request({
+        method: "anvil_impersonateAccount",
+        params: [action.actor]
+      });
 
-    // Fund actor with 1 ETH for gas if needed
-    await this.rpcClient.request({
-      method: "anvil_setBalance",
-      params: [action.actor, "0xde0b6b3a7640000"] // 1 ETH
-    });
+      await this.rpcClient.request({
+        method: "anvil_setBalance",
+        params: [action.actor, "0xde0b6b3a7640000"] // 1 ETH
+      });
+    } catch (err: any) {
+      throw new Error(`RPC infrastructure error during actor preparation for [${action.id}]: ${err.message || err}`);
+    }
 
-    // Send transaction
+    // 2. Build and dispatch transaction
     const txParams: any = {
       from: action.actor,
       to: action.target,
@@ -499,14 +533,29 @@ export class ReachabilityExplorer {
       txParams.authorizationList = action.authorizationList;
     }
 
-    const txHash: Hash = await this.rpcClient.request({
-      method: "eth_sendTransaction",
-      params: [txParams]
-    });
+    let txHash: Hash;
+    try {
+      txHash = await this.rpcClient.request({
+        method: "eth_sendTransaction",
+        params: [txParams]
+      });
+    } catch (err: any) {
+      if (isEvmRevertError(err)) {
+        throw new TransactionRevertedError(action.id, "reverted", err.message);
+      }
+      throw new Error(`RPC transport failure dispatching transaction for [${action.id}]: ${err.message || err}`);
+    }
 
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    // 3. Await transaction receipt
+    let receipt: any;
+    try {
+      receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    } catch (err: any) {
+      throw new Error(`RPC timeout or transport error waiting for receipt [${action.id}]: ${err.message || err}`);
+    }
+
     if (receipt.status !== "success") {
-      throw new Error(`Transaction ${action.id} reverted on-chain (status: ${receipt.status})`);
+      throw new TransactionRevertedError(action.id, receipt.status);
     }
   }
 }
