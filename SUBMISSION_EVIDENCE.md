@@ -4,7 +4,7 @@
 **Project Name:** Aegis7702  
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
-**Release Tag:** [`hackathon-final-v1.0.3`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.3)  
+**Release Tag:** [`hackathon-final-v1.0.4`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.4)  
 **Latest Verified Release CI Run:** [GitHub Actions Run #36086398781](https://github.com/lewbei/aegis7702/actions/runs/36086398781) (4/4 jobs green)  
 **Reference Benchmark CI Run:** [GitHub Actions Run #36086398781](https://github.com/lewbei/aegis7702/actions/runs/36086398781)  
 
