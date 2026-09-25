@@ -703,6 +703,46 @@ async function runIntegrationTests() {
       body: JSON.stringify({ runId: portfolioData.runId })
     });
 
+    // Subtest 7H: Trust Boundary Defense: untrusted client request CANNOT suppress session portfolio
+    console.log("  -> Subtest 7H: Trust Boundary Defense (untrusted client cannot suppress session portfolio)...");
+    const overrideAttemptRes = await fetch(`${BASE_URL}/api/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenarioId: "portfolio_residual_risk" })
+    });
+    if (!overrideAttemptRes.ok) throw new Error(`Analyze for Subtest 7H failed: ${await overrideAttemptRes.text()}`);
+    const overrideSession = await overrideAttemptRes.json();
+
+    // Adversarial client attempt: passes capabilityPortfolio: [] to trick the server into skipping portfolio verification
+    const spoofedRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: overrideSession.runId,
+        capabilityPortfolio: [] // Attacker attempts to bypass portfolio check with empty list
+      })
+    });
+    if (!spoofedRecoverRes.ok) throw new Error(`Recover for Subtest 7H failed: ${await spoofedRecoverRes.text()}`);
+    const spoofedRecoverData = await spoofedRecoverRes.json();
+
+    if (
+      !spoofedRecoverData.postRecoveryExplore ||
+      spoofedRecoverData.postRecoveryExplore.status === "PORTFOLIO_NO_MODELED_LOSS" ||
+      spoofedRecoverData.postRecoveryExplore.status !== "FOUND_RESIDUAL_LOSS" ||
+      spoofedRecoverData.postRecoveryExplore.verified !== false ||
+      spoofedRecoverData.postRecoveryExplore.violatingCapability !== "PERMIT2_ALLOWANCE"
+    ) {
+      throw new Error(`CRITICAL SOUNDNESS FAILURE: Client bypassed portfolio check with empty list! Got: ${JSON.stringify(spoofedRecoverData.postRecoveryExplore)}`);
+    }
+    console.log(`     ✓ Trust boundary enforced: server strictly audited session portfolio and discovered residual loss despite client sending capabilityPortfolio: [] (status=${spoofedRecoverData.postRecoveryExplore.status}, verified=${spoofedRecoverData.postRecoveryExplore.verified})`);
+
+    // Clean up overrideSession
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: overrideSession.runId })
+    });
+
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");
     console.log("================================================================================\n");

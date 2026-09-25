@@ -237,6 +237,27 @@ async function runMultiAuditorTests() {
     console.log(`    Violating capability: ${res3.violatingCapability.kind}`);
     console.log(`    Discovered loss: ${res3.counterexample.counterexample.loss.amount} tokens`);
 
+    // -------------------------------------------------------------------------
+    // TEST 4: Empty Capability Portfolio Defense
+    // Zero capabilities MUST return PORTFOLIO_INCOMPLETE (strictly forbidden to return PORTFOLIO_NO_MODELED_LOSS or SECURE)
+    // -------------------------------------------------------------------------
+    console.log("\n[Test 4] Auditing empty portfolio: []...");
+    const res4 = await auditor.audit([], attacker);
+
+    if (res4.status !== "PORTFOLIO_INCOMPLETE") {
+      throw new Error(`CRITICAL SOUNDNESS BUG: Expected status 'PORTFOLIO_INCOMPLETE' for empty portfolio, got '${res4.status}'!`);
+    }
+    if ((res4 as any).status === "PORTFOLIO_NO_MODELED_LOSS" || (res4 as any).status === "SECURE") {
+      throw new Error("FORBIDDEN: Empty portfolio must never receive positive security clearance!");
+    }
+    if (res4.evaluatedCount !== 0) {
+      throw new Error(`Expected evaluatedCount: 0 for empty portfolio, got ${res4.evaluatedCount}`);
+    }
+    console.log("  ✓ Correctly rejected empty portfolio as PORTFOLIO_INCOMPLETE (Zero capabilities != SAFE)");
+    console.log(`    Status: ${res4.status}`);
+    console.log(`    Evaluated count: ${res4.evaluatedCount}`);
+    console.log(`    Message: "${res4.message}"`);
+
     console.log("\n==================================================================");
     console.log("🎉 ALL MULTI-CAPABILITY AUDITOR INVARIANT TESTS PASSED 100%!");
     console.log("==================================================================\n");

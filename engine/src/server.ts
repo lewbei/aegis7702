@@ -1178,8 +1178,10 @@ async function handleRecover(body: any): Promise<any> {
     publicClient,
     { request: async (args: any) => publicClient.request(args) }
   );
+  // Authoritative trust boundary: Server recovery verification MUST evaluate
+  // the trusted session portfolio and MUST NOT allow untrusted HTTP body overrides.
   const portfolioToAudit: CapabilitySet =
-    body.capabilityPortfolio ?? session.capabilityPortfolio ?? [session.capability];
+    session.capabilityPortfolio ?? [session.capability];
   const auditResult = await auditor.audit(portfolioToAudit, session.attacker);
   const postRecoveryVerified = auditResult.status === "PORTFOLIO_NO_MODELED_LOSS";
 

@@ -46,6 +46,7 @@ export type MultiAuditResult =
  * mutations of one verification from contaminating subsequent evaluations.
  *
  * Strict Invariant:
+ *   - Empty capabilityPortfolio => PORTFOLIO_INCOMPLETE (Zero capabilities verified != SAFE)
  *   - Any capability yielding FOUND_LOSS => FOUND_RESIDUAL_LOSS
  *   - Else any capability yielding UNMODELED => PORTFOLIO_INCOMPLETE (UNMODELED != SAFE)
  *   - Else (all modeled and explore without loss) => PORTFOLIO_NO_MODELED_LOSS
@@ -66,6 +67,28 @@ export class MultiCapabilityAuditor {
     }
   ): Promise<MultiAuditResult> {
     const startTime = Date.now();
+
+    if (capabilityPortfolio.length === 0) {
+      return {
+        status: "PORTFOLIO_INCOMPLETE",
+        evaluatedCount: 0,
+        unmodeledCapabilities: [],
+        unmodeledReasons: [
+          "Capability portfolio is empty; no security verification was performed"
+        ],
+        metrics: {
+          totalEvaluated: 0,
+          totalVisitedStates: 0,
+          totalEvmCalls: 0,
+          totalSnapshots: 0,
+          totalBacktracks: 0,
+          elapsedMs: Date.now() - startTime
+        },
+        message:
+          "Portfolio audit incomplete: no capabilities were supplied for verification"
+      };
+    }
+
     let totalVisited = 0;
     let totalCalls = 0;
     let totalSnapshots = 0;
