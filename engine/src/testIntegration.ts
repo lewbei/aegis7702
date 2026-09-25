@@ -399,6 +399,42 @@ async function runIntegrationTests() {
     }
     console.log(`     ✓ Forbidden cloud metadata SSRF successfully blocked: "${ssrfData.error}"`);
 
+    // Subtest 7C.2: State chainId mismatch rejection (Fail Closed HTTP 400)
+    console.log("  -> Subtest 7C.2: State chainId mismatch rejection (Fail Closed HTTP 400)...");
+    const mainnetAuth = await signAuthorization(
+      createPublicClient({ transport: viemHttp("http://127.0.0.1:8545") }),
+      {
+        account: testAccount,
+        contractAddress: "0x0000000000000000000000000000000000000000",
+        chainId: 1,
+        nonce: 0
+      }
+    );
+    const mismatchRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: mainnetAuth.address,
+          chainId: mainnetAuth.chainId,
+          nonce: mainnetAuth.nonce,
+          yParity: mainnetAuth.yParity,
+          r: mainnetAuth.r,
+          s: mainnetAuth.s
+        }
+      })
+    });
+    if (mismatchRes.status !== 400) {
+      throw new Error(`Expected HTTP 400 for state chainId mismatch, got ${mismatchRes.status}`);
+    }
+    const mismatchData = await mismatchRes.json();
+    if (!mismatchData.error || !mismatchData.error.includes("State chainId mismatch")) {
+      throw new Error(`Expected error mentioning State chainId mismatch, got ${JSON.stringify(mismatchData)}`);
+    }
+    console.log(`     ✓ State chainId mismatch successfully rejected with HTTP 400: "${mismatchData.error}"`);
+
     // Subtest 7D: Wallet-Signable Recovery API (/api/recovery-plan)
     console.log("  -> Subtest 7D: Wallet-signable recovery plan generation (/api/recovery-plan)...");
     const planRes = await fetch(`${BASE_URL}/api/recovery-plan`, {

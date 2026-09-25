@@ -42,7 +42,7 @@ export class EIP7702RecoveryPlanner {
         recoveryDelegation: {
           address: "0x0000000000000000000000000000000000000000",
           chainId: Number(capability.chainId),
-          nonce: currentNonce
+          nonce: currentNonce + 1
         }
       };
     }

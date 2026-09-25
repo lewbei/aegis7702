@@ -226,7 +226,8 @@ export async function runUsenixEvaluation() {
 
   // Boot local Anvil node with Prague hardfork
   const ANVIL_PORT = 8565;
-  const anvil = spawn("anvil", ["--port", ANVIL_PORT.toString(), "--silent", "--hardfork", "prague"]);
+  const ANVIL_BIN = process.env.ANVIL_BIN ?? "anvil";
+  const anvil = spawn(ANVIL_BIN, ["--port", ANVIL_PORT.toString(), "--silent", "--hardfork", "prague"]);
   await new Promise((r) => setTimeout(r, 1500));
 
   const rpcUrl = `http://127.0.0.1:${ANVIL_PORT}`;

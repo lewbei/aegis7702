@@ -1052,14 +1052,9 @@ async function executeAnalyzeCapability(body: any): Promise<any> {
     // 3. State-Source Validation: Verify state chainId matches capability chainId
     const stateChainId = await publicClient.getChainId();
     if (BigInt(stateChainId) !== capability.chainId) {
-      return {
-        status: "STATE_UNAVAILABLE",
-        valid: true,
-        signer: validation.signer,
-        reason: `State chainId mismatch: reconstructed EVM state has chainId ${stateChainId} but capability is signed for chainId ${capability.chainId}. Provide corresponding forkUrl.`,
-        counterexample: null,
-        prospectiveRisk: null
-      };
+      throw new Error(
+        `State chainId mismatch: reconstructed EVM state has chainId ${stateChainId} but capability is signed for chainId ${capability.chainId}. Provide corresponding forkUrl.`
+      );
     }
 
     // 4. Validate target contract availability on reconstructed state
@@ -1071,14 +1066,9 @@ async function executeAnalyzeCapability(body: any): Promise<any> {
     if (targetContract && targetContract !== "0x0000000000000000000000000000000000000000") {
       const targetCode = await publicClient.getBytecode({ address: targetContract });
       if (!targetCode || targetCode === "0x") {
-        return {
-          status: "STATE_UNAVAILABLE",
-          valid: true,
-          signer: validation.signer,
-          reason: `Target contract at ${targetContract} is not deployed on reconstructed EVM state (chainId ${stateChainId}). Provide forkUrl parameter to reconstruct on-chain storage/bytecode.`,
-          counterexample: null,
-          prospectiveRisk: null
-        };
+        throw new Error(
+          `Target contract at ${targetContract} is not deployed on reconstructed EVM state (chainId ${stateChainId}). Provide forkUrl parameter to reconstruct on-chain storage/bytecode.`
+        );
       }
     }
 
@@ -1418,6 +1408,7 @@ const server = http.createServer(async (req, res) => {
             err.message.startsWith("Unsupported capability") ||
             err.message.startsWith("SSRF rejected") ||
             err.message.startsWith("State chainId mismatch") ||
+            err.message.startsWith("Target contract at") ||
             err.message.includes("Unexpected token"));
         const isRateLimit = err.message && err.message.startsWith("Worker pool saturated");
         const status = isRateLimit ? 429 : isClientErr ? 400 : 500;
