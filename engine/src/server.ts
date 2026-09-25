@@ -34,6 +34,7 @@ import {
   VerificationOutcome,
   ProspectiveRisk
 } from "./capability/types.js";
+import { MultiCapabilityAuditor, CapabilitySet } from "./capability/multiAuditor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,7 +49,8 @@ export type CanonicalScenario =
   | "permit2_signature"
   | "eip7702"
   | "eip7702_future_nonce"
-  | "eip7702_active_delegation";
+  | "eip7702_active_delegation"
+  | "portfolio_residual_risk";
 
 export function normalizeScenario(scenarioId: string): CanonicalScenario {
   if (typeof scenarioId !== "string" || !scenarioId.trim()) {
@@ -73,6 +75,9 @@ export function normalizeScenario(scenarioId: string): CanonicalScenario {
       return "eip7702_future_nonce";
     case "eip7702activedelegation":
       return "eip7702_active_delegation";
+    case "portfolioresidualrisk":
+    case "portfolioresidual":
+      return "portfolio_residual_risk";
     default:
       throw new Error(`Unsupported scenario: ${scenarioId}`);
   }
@@ -90,6 +95,7 @@ interface ActiveSession {
   attacker: Address;
   victimAccount: any;
   capability: any;
+  capabilityPortfolio?: CapabilitySet;
   status: VerificationOutcome;
   counterexample: any;
   prospectiveRisk: ProspectiveRisk | null;
@@ -433,6 +439,7 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      capabilityPortfolio: [capability],
       status,
       counterexample,
       prospectiveRisk,
@@ -564,6 +571,7 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      capabilityPortfolio: [capability],
       status,
       counterexample,
       prospectiveRisk,
@@ -750,6 +758,7 @@ async function handleAnalyze(body: any): Promise<any> {
       attacker,
       victimAccount,
       capability,
+      capabilityPortfolio: [capability],
       status,
       counterexample,
       prospectiveRisk,
@@ -776,6 +785,184 @@ async function handleAnalyze(body: any): Promise<any> {
       counterexample,
       prospectiveRisk,
       recoveryPlan
+    };
+  }
+
+  if (canonicalId === "portfolio_residual_risk") {
+    const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil("prague");
+    const rpcUrl = `http://127.0.0.1:${anvilPort}`;
+    const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
+    const victimWallet = createWalletClient({ account: victimAccount, transport: viemHttp(rpcUrl) });
+    const attackerWallet = createWalletClient({ account: attackerAccount, transport: viemHttp(rpcUrl) });
+
+    const usdcArtifact = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../contracts/out/MockUSDC.sol/MockUSDC.json"), "utf8")
+    );
+    const delegateArtifact = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../contracts/out/MaliciousDelegate.sol/MaliciousDelegate.json"), "utf8")
+    );
+    const permit2Artifact = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../contracts/out/Permit2.sol/Permit2.json"), "utf8")
+    );
+
+    const usdcTx = await victimWallet.deployContract({
+      abi: usdcArtifact.abi,
+      bytecode: usdcArtifact.bytecode.object as Hex
+    });
+    const usdcReceipt = await publicClient.waitForTransactionReceipt({ hash: usdcTx });
+    const usdcAddress = usdcReceipt.contractAddress!;
+
+    const delTx = await attackerWallet.deployContract({
+      abi: delegateArtifact.abi,
+      bytecode: delegateArtifact.bytecode.object as Hex
+    });
+    const delReceipt = await publicClient.waitForTransactionReceipt({ hash: delTx });
+    const delegateAddress = delReceipt.contractAddress!;
+
+    const p2Tx = await victimWallet.deployContract({
+      abi: permit2Artifact.abi,
+      bytecode: permit2Artifact.bytecode.object as Hex
+    });
+    const p2Receipt = await publicClient.waitForTransactionReceipt({ hash: p2Tx });
+    const permit2Address = p2Receipt.contractAddress!;
+
+    const INITIAL_USDC = parseUnits("10000", 6);
+    const mintTx = await victimWallet.writeContract({
+      address: usdcAddress,
+      abi: usdcArtifact.abi,
+      functionName: "mint",
+      args: [victim, INITIAL_USDC]
+    });
+    await publicClient.waitForTransactionReceipt({ hash: mintTx });
+
+    // Setup Permit2 approval & signed allowance
+    const approveTx = await victimWallet.writeContract({
+      address: usdcAddress,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [permit2Address, 2n ** 256n - 1n]
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+
+    const expiration = Math.floor(Date.now() / 1000) + 86400;
+    const sigDeadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+    const p2TypeData = {
+      types: {
+        PermitDetails: [
+          { name: "token", type: "address" },
+          { name: "amount", type: "uint160" },
+          { name: "expiration", type: "uint48" },
+          { name: "nonce", type: "uint48" }
+        ],
+        PermitSingle: [
+          { name: "details", type: "PermitDetails" },
+          { name: "spender", type: "address" },
+          { name: "sigDeadline", type: "uint256" }
+        ]
+      },
+      primaryType: "PermitSingle" as const,
+      domain: { name: "Permit2", chainId: 31337, verifyingContract: permit2Address },
+      message: {
+        details: { token: usdcAddress, amount: parseUnits("5000", 6), expiration, nonce: 0 },
+        spender: attacker,
+        sigDeadline
+      }
+    };
+    const p2Sig = await victimWallet.signTypedData(p2TypeData);
+    const permit2Cap = decodePermit2Allowance({
+      owner: victim,
+      domain: p2TypeData.domain,
+      types: p2TypeData.types,
+      message: p2TypeData.message,
+      signature: p2Sig
+    });
+
+    // Setup EIP-7702 active delegation
+    const signedNonce = await publicClient.getTransactionCount({ address: victim });
+    const auth = await signAuthorization(publicClient, {
+      account: victimAccount,
+      contractAddress: delegateAddress,
+      chainId: 31337,
+      nonce: signedNonce
+    });
+
+    const installTx = await publicClient.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from: attacker,
+          to: victim,
+          data: "0x",
+          authorizationList: [auth]
+        }
+      ]
+    } as any);
+    await publicClient.waitForTransactionReceipt({ hash: installTx });
+
+    const eip7702Cap = decode7702({
+      owner: victim,
+      chainId: auth.chainId,
+      address: delegateAddress,
+      nonce: auth.nonce,
+      yParity: auth.yParity,
+      r: auth.r,
+      s: auth.s,
+      targetToken: usdcAddress
+    });
+
+    const capabilityPortfolio: CapabilitySet = [eip7702Cap, permit2Cap];
+
+    const explorer = new ReachabilityExplorer(
+      publicClient,
+      { request: async (args: any) => publicClient.request(args) },
+      3
+    );
+    const exploreRes = await explorer.explore(eip7702Cap, attacker);
+    const status: VerificationOutcome = exploreRes.status;
+    const counterexample: any = exploreRes.status === "FOUND_LOSS" ? exploreRes.counterexample : null;
+
+    const recoveryPlan = await EIP7702RecoveryPlanner.plan(eip7702Cap, publicClient);
+
+    sessions.set(runId, {
+      scenarioId: requestedScenarioId,
+      canonicalId,
+      anvilProcess,
+      anvilPort,
+      publicClient,
+      victimWallet,
+      attackerWallet,
+      victim,
+      attacker,
+      victimAccount,
+      capability: eip7702Cap,
+      capabilityPortfolio,
+      status,
+      counterexample,
+      prospectiveRisk: null,
+      recoveryPlan,
+      tokenAddress: usdcAddress,
+      delegateAddress,
+      initialBalance: INITIAL_USDC,
+      createdAt: Date.now()
+    });
+
+    return {
+      runId,
+      scenarioId: requestedScenarioId,
+      canonicalId,
+      port: anvilPort,
+      engineStatus: "LIVE_ANVIL",
+      status,
+      baseline: {
+        lossAmount: "0.00",
+        lossSymbol: "USDC",
+        verdict: "SAFE",
+        message: "B₀ verdict SAFE under immediate-delta criterion only"
+      },
+      counterexample,
+      prospectiveRisk: null,
+      recoveryPlan,
+      portfolioCount: capabilityPortfolio.length
     };
   }
 
@@ -908,7 +1095,8 @@ async function handleRecover(body: any): Promise<any> {
   if (
     canonicalId === "eip7702" ||
     canonicalId === "eip7702_future_nonce" ||
-    canonicalId === "eip7702_active_delegation"
+    canonicalId === "eip7702_active_delegation" ||
+    canonicalId === "portfolio_residual_risk"
   ) {
     switch (recoveryPlan.strategy) {
       case "ADVANCE_NONCE":
@@ -984,16 +1172,16 @@ async function handleRecover(body: any): Promise<any> {
     gasUsed = receipt.gasUsed.toString();
   }
 
-  // POST-RECOVERY FULL BOUNDED RE-SEARCH:
-  // Re-run the reachability explorer from the post-recovery EVM state s_R:
-  // Explore(c, s_R, A_modeled, k) === "NO_MODELED_LOSS"
-  const postRecoveryExplorer = new ReachabilityExplorer(
+  // POST-RECOVERY FULL BOUNDED RE-SEARCH USING MULTI-CAPABILITY AUDITOR:
+  // Evaluates the account's complete capability portfolio (CapabilitySet) on state s_R
+  const auditor = new MultiCapabilityAuditor(
     publicClient,
-    { request: async (args: any) => publicClient.request(args) },
-    3
+    { request: async (args: any) => publicClient.request(args) }
   );
-  const postRecoveryResult = await postRecoveryExplorer.explore(session.capability, session.attacker);
-  const postRecoveryVerified = postRecoveryResult.status === "NO_MODELED_LOSS";
+  const portfolioToAudit: CapabilitySet =
+    body.capabilityPortfolio ?? session.capabilityPortfolio ?? [session.capability];
+  const auditResult = await auditor.audit(portfolioToAudit, session.attacker);
+  const postRecoveryVerified = auditResult.status === "PORTFOLIO_NO_MODELED_LOSS";
 
   return {
     runId,
@@ -1005,11 +1193,21 @@ async function handleRecover(body: any): Promise<any> {
     description: recoveryPlan.description,
     totalTxsExecuted,
     postRecoveryExplore: {
-      status: postRecoveryResult.status,
+      status: auditResult.status,
       verified: postRecoveryVerified,
-      message: postRecoveryVerified
-        ? "Post-recovery reachability re-search complete: verified 0 reachable loss paths on state s_R"
-        : `Post-recovery reachability search failed: outcome ${postRecoveryResult.status}`
+      evaluatedCount: auditResult.evaluatedCount,
+      metrics: auditResult.metrics,
+      violatingCapability:
+        auditResult.status === "FOUND_RESIDUAL_LOSS" ? auditResult.violatingCapability.kind : undefined,
+      residualLoss:
+        auditResult.status === "FOUND_RESIDUAL_LOSS"
+          ? auditResult.counterexample.loss
+          : undefined,
+      unmodeledCount:
+        auditResult.status === "PORTFOLIO_INCOMPLETE"
+          ? auditResult.unmodeledCapabilities.length
+          : undefined,
+      message: auditResult.message
     }
   };
 }
@@ -1056,7 +1254,8 @@ async function handleReplay(body: any): Promise<any> {
   if (
     canonicalId === "eip7702" ||
     canonicalId === "eip7702_future_nonce" ||
-    canonicalId === "eip7702_active_delegation"
+    canonicalId === "eip7702_active_delegation" ||
+    canonicalId === "portfolio_residual_risk"
   ) {
     if (recoveryPlan.strategy === "CLEAR_DELEGATION") {
       const delegateArtifact = JSON.parse(
@@ -1340,7 +1539,8 @@ async function handleRecoveryPlan(body: any): Promise<any> {
     if (
       canonicalId === "eip7702" ||
       canonicalId === "eip7702_future_nonce" ||
-      canonicalId === "eip7702_active_delegation"
+      canonicalId === "eip7702_active_delegation" ||
+      canonicalId === "portfolio_residual_risk"
     ) {
       if (recoveryPlan.strategy === "CLEAR_DELEGATION") {
         walletTransactions.push({
@@ -1389,7 +1589,8 @@ async function handleRecoveryPlan(body: any): Promise<any> {
     if (
       canonicalId === "eip7702" ||
       canonicalId === "eip7702_future_nonce" ||
-      canonicalId === "eip7702_active_delegation"
+      canonicalId === "eip7702_active_delegation" ||
+      canonicalId === "portfolio_residual_risk"
     ) {
       preconditions = {
         accountAddress: victim,
@@ -1633,7 +1834,8 @@ const server = http.createServer(async (req, res) => {
           sendJson(res, 200, result);
         } else if (url === "/api/recover") {
           const result = await handleRecover(body);
-          sendJson(res, 200, result);
+          const statusCode = result.status === "STATE_PRECONDITION_FAILED" ? 409 : 200;
+          sendJson(res, statusCode, result);
         } else if (url === "/api/recovery-plan") {
           const result = await handleRecoveryPlan(body);
           sendJson(res, 200, result);

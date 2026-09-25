@@ -4,7 +4,7 @@
 **Project Name:** Aegis7702  
 **Tagline:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability on EVM forks and synthesizes verified on-fork recovery.  
 **Repository:** [https://github.com/lewbei/aegis7702](https://github.com/lewbei/aegis7702)  
-**Release Tag:** [`hackathon-final-v1.0.8`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.8)  
+**Release Tag:** [`hackathon-final-v1.0.9`](https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.9)  
 **Latest Verified Release CI Run:** [GitHub Actions Run #36113811960](https://github.com/lewbei/aegis7702/actions/runs/36113811960) (4/4 jobs green)  
 **Reference Benchmark CI Run:** [GitHub Actions Run #36113811960](https://github.com/lewbei/aegis7702/actions/runs/36113811960) (4/4 jobs green)  
 
@@ -127,7 +127,7 @@ Aegis7702 proves that:
 2. **Worker Pool & Watchdog Concurrency Limiting:** Restricts simultaneous on-demand reachability verifications to 4 concurrent worker slots globally at Anvil process spawn time (`MAX_CONCURRENT_WORKERS = 4` -> HTTP 429 Too Many Requests) with an automated 30-second timeout watchdog that explicitly terminates child processes (`SIGKILL`), preventing Denial-of-Service or orphaned background processes.
 3. **Multi-Capability Portfolio Auditor (`MultiCapabilityAuditor`):** Moves beyond single-trace replay by evaluating an account's complete capability portfolio (`CapabilitySet`) across isolated state snapshots $s_R$, catching residual vulnerabilities (such as unrevoked Permit2 allowances) when an EIP-7702 delegation is cleared.
 4. **Wallet-Signable Recovery API (`POST /api/recovery-plan`):** Generates unsigned transaction envelopes formatted for native `window.ethereum.request({ method: 'eth_sendTransaction' })` wallet prompts alongside typed cryptographic state preconditions across EIP-7702 and Permit2.
-5. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery execution with `STATE_PRECONDITION_FAILED` if any on-chain state changes between reachability verification and recovery dispatch:
+5. **State-Race Precondition Guards (`STATE_PRECONDITION_FAILED`):** Aborts recovery execution with HTTP 409 Conflict (`STATE_PRECONDITION_FAILED`) if any on-chain state changes between reachability verification and recovery dispatch:
    - EIP-7702: Account nonce mismatch (`expectedAccountNonce`), active delegation status mismatch (`expectedActiveDelegation`), or bytecode divergence (`expectedBytecode`).
    - Permit2 Allowance: Nonce mismatch (`expectedPermitNonce`) or allowance amount divergence (`expectedAllowedAmount`).
    - Permit2 Signature: Nonce bitmap word divergence (`expectedNonceBitmapWord`).

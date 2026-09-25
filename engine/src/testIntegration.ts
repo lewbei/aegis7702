@@ -72,7 +72,7 @@ async function runIntegrationTests() {
       const recoverData = await recoverRes.json();
       if (
         !recoverData.postRecoveryExplore ||
-        recoverData.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+        recoverData.postRecoveryExplore.status !== "PORTFOLIO_NO_MODELED_LOSS" ||
         !recoverData.postRecoveryExplore.verified
       ) {
         throw new Error(`Post-recovery bounded search failed for ${sc.id}: ${JSON.stringify(recoverData.postRecoveryExplore)}`);
@@ -89,7 +89,7 @@ async function runIntegrationTests() {
       if (!replayData.mitigated) {
         throw new Error(`Mitigation failed for canonical scenario ${sc.id}`);
       }
-      console.log(`     ✓ Canonical ${sc.name}: status=FOUND_LOSS, postRecoveryExplore=NO_MODELED_LOSS, replay mitigated=true (100% verified)`);
+      console.log(`     ✓ Canonical ${sc.name}: status=FOUND_LOSS, postRecoveryExplore=PORTFOLIO_NO_MODELED_LOSS, replay mitigated=true (100% verified)`);
     }
 
     // 3. Adversarial Test 1: EIP-7702 Multi-Advance (current=5, auth=8)
@@ -131,7 +131,7 @@ async function runIntegrationTests() {
 
     if (
       !eipFutureRec.postRecoveryExplore ||
-      eipFutureRec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      eipFutureRec.postRecoveryExplore.status !== "PORTFOLIO_NO_MODELED_LOSS" ||
       !eipFutureRec.postRecoveryExplore.verified
     ) {
       throw new Error(`Post-recovery bounded search failed for eip7702_future_nonce: ${JSON.stringify(eipFutureRec.postRecoveryExplore)}`);
@@ -227,7 +227,7 @@ async function runIntegrationTests() {
 
     if (
       !p2Delta65535Rec.postRecoveryExplore ||
-      p2Delta65535Rec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      p2Delta65535Rec.postRecoveryExplore.status !== "PORTFOLIO_NO_MODELED_LOSS" ||
       !p2Delta65535Rec.postRecoveryExplore.verified
     ) {
       throw new Error(`Post-recovery bounded search failed for delta 65535: ${JSON.stringify(p2Delta65535Rec.postRecoveryExplore)}`);
@@ -269,7 +269,7 @@ async function runIntegrationTests() {
 
     if (
       !p2Delta65536Rec.postRecoveryExplore ||
-      p2Delta65536Rec.postRecoveryExplore.status !== "NO_MODELED_LOSS" ||
+      p2Delta65536Rec.postRecoveryExplore.status !== "PORTFOLIO_NO_MODELED_LOSS" ||
       !p2Delta65536Rec.postRecoveryExplore.verified
     ) {
       throw new Error(`Post-recovery bounded search failed for delta 65536: ${JSON.stringify(p2Delta65536Rec.postRecoveryExplore)}`);
@@ -509,11 +509,14 @@ async function runIntegrationTests() {
         expectedAccountNonce: 999999 // Intentionally diverged nonce to trigger state-race guard
       })
     });
+    if (raceRecoverRes.status !== 409) {
+      throw new Error(`Expected HTTP 409 Conflict for nonce mismatch, got HTTP ${raceRecoverRes.status}`);
+    }
     const raceRecoverData = await raceRecoverRes.json();
     if (raceRecoverData.status !== "STATE_PRECONDITION_FAILED") {
       throw new Error(`Expected STATE_PRECONDITION_FAILED for nonce mismatch, got ${JSON.stringify(raceRecoverData)}`);
     }
-    console.log(`     ✓ State-race nonce mismatch triggered: status=${raceRecoverData.status}, reason="${raceRecoverData.reason}"`);
+    console.log(`     ✓ State-race nonce mismatch triggered HTTP 409: status=${raceRecoverData.status}, reason="${raceRecoverData.reason}"`);
 
     // Subtest 7E.1: Bytecode mismatch triggers STATE_PRECONDITION_FAILED
     console.log("  -> Subtest 7E.1: State-race expectedBytecode mismatch defense in /api/recover...");
@@ -525,11 +528,14 @@ async function runIntegrationTests() {
         expectedBytecode: "0xdeadbeef" // Intentionally diverged bytecode
       })
     });
+    if (bytecodeRecoverRes.status !== 409) {
+      throw new Error(`Expected HTTP 409 Conflict for bytecode mismatch, got HTTP ${bytecodeRecoverRes.status}`);
+    }
     const bytecodeRecoverData = await bytecodeRecoverRes.json();
     if (bytecodeRecoverData.status !== "STATE_PRECONDITION_FAILED") {
       throw new Error(`Expected STATE_PRECONDITION_FAILED for bytecode mismatch, got ${JSON.stringify(bytecodeRecoverData)}`);
     }
-    console.log(`     ✓ State-race bytecode mismatch triggered: status=${bytecodeRecoverData.status}, reason="${bytecodeRecoverData.reason}"`);
+    console.log(`     ✓ State-race bytecode mismatch triggered HTTP 409: status=${bytecodeRecoverData.status}, reason="${bytecodeRecoverData.reason}"`);
 
     // Clean up raceSession
     await fetch(`${BASE_URL}/api/replay`, {
@@ -556,11 +562,14 @@ async function runIntegrationTests() {
         expectedPermitNonce: 999999
       })
     });
+    if (p2RecoverRes.status !== 409) {
+      throw new Error(`Expected HTTP 409 Conflict for Permit2 nonce mismatch, got HTTP ${p2RecoverRes.status}`);
+    }
     const p2RecoverData = await p2RecoverRes.json();
     if (p2RecoverData.status !== "STATE_PRECONDITION_FAILED") {
       throw new Error(`Expected STATE_PRECONDITION_FAILED for Permit2 nonce mismatch, got ${JSON.stringify(p2RecoverData)}`);
     }
-    console.log(`     ✓ Permit2 allowance nonce mismatch triggered: status=${p2RecoverData.status}, reason="${p2RecoverData.reason}"`);
+    console.log(`     ✓ Permit2 allowance nonce mismatch triggered HTTP 409: status=${p2RecoverData.status}, reason="${p2RecoverData.reason}"`);
 
     // Clean up p2Session
     await fetch(`${BASE_URL}/api/replay`, {
@@ -587,11 +596,14 @@ async function runIntegrationTests() {
         expectedNonceBitmapWord: "999999999999999999"
       })
     });
+    if (p2SigRecoverRes.status !== 409) {
+      throw new Error(`Expected HTTP 409 Conflict for Permit2 bitmap word mismatch, got HTTP ${p2SigRecoverRes.status}`);
+    }
     const p2SigRecoverData = await p2SigRecoverRes.json();
     if (p2SigRecoverData.status !== "STATE_PRECONDITION_FAILED") {
       throw new Error(`Expected STATE_PRECONDITION_FAILED for Permit2 bitmap word mismatch, got ${JSON.stringify(p2SigRecoverData)}`);
     }
-    console.log(`     ✓ Permit2 signature bitmap word mismatch triggered: status=${p2SigRecoverData.status}, reason="${p2SigRecoverData.reason}"`);
+    console.log(`     ✓ Permit2 signature bitmap word mismatch triggered HTTP 409: status=${p2SigRecoverData.status}, reason="${p2SigRecoverData.reason}"`);
 
     // Clean up p2SigSession
     await fetch(`${BASE_URL}/api/replay`, {
@@ -652,6 +664,44 @@ async function runIntegrationTests() {
       body: JSON.stringify({ runId: freedData.runId })
     });
     console.log(`     ✓ Worker pool successfully reclaimed: new session allocated and cleaned up`);
+
+    // Subtest 7G: Multi-Capability Portfolio Residual Risk detection in /api/recover
+    console.log("  -> Subtest 7G: Multi-Capability Portfolio Residual Risk detection in /api/recover...");
+    const portfolioRes = await fetch(`${BASE_URL}/api/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenarioId: "portfolio_residual_risk" })
+    });
+    if (!portfolioRes.ok) throw new Error(`Analyze portfolio_residual_risk failed: ${await portfolioRes.text()}`);
+    const portfolioData = await portfolioRes.json();
+    if (portfolioData.status !== "FOUND_LOSS") {
+      throw new Error(`Expected FOUND_LOSS for portfolio_residual_risk, got ${portfolioData.status}`);
+    }
+
+    const portfolioRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: portfolioData.runId })
+    });
+    if (!portfolioRecoverRes.ok) throw new Error(`Recover portfolio_residual_risk failed: ${await portfolioRecoverRes.text()}`);
+    const portfolioRecoverData = await portfolioRecoverRes.json();
+
+    if (
+      !portfolioRecoverData.postRecoveryExplore ||
+      portfolioRecoverData.postRecoveryExplore.status !== "FOUND_RESIDUAL_LOSS" ||
+      portfolioRecoverData.postRecoveryExplore.verified !== false ||
+      portfolioRecoverData.postRecoveryExplore.violatingCapability !== "PERMIT2_ALLOWANCE"
+    ) {
+      throw new Error(`Expected FOUND_RESIDUAL_LOSS with violatingCapability PERMIT2_ALLOWANCE, got: ${JSON.stringify(portfolioRecoverData.postRecoveryExplore)}`);
+    }
+    console.log(`     ✓ MultiCapabilityAuditor correctly detected unmitigated secondary risk on state s_R: status=${portfolioRecoverData.postRecoveryExplore.status}, violating=${portfolioRecoverData.postRecoveryExplore.violatingCapability}, verified=${portfolioRecoverData.postRecoveryExplore.verified}`);
+
+    // Clean up portfolioSession
+    await fetch(`${BASE_URL}/api/replay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: portfolioData.runId })
+    });
 
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");
