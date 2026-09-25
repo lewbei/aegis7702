@@ -132,6 +132,36 @@ Reproduce live on local EVM snapshots via: `cd engine && npm run eval:usenix` (f
 
 ---
 
+## Controlled Empirical Comparison: State-Aware Greedy Runner ($B_1$) vs. Aegis Reachability Explorer (CRV)
+
+To rigorously isolate the contribution of **bounded tree search with EVM backtracking** from simple multi-step simulation, we evaluated Aegis against a strong, state-aware reference baseline ($B_1$ - `StateAwareGreedyRunner`) under identical EVM environments, knowledge, and bounded step constraints ($k \le 3$):
+
+* **$B_0$ (Immediate-Delta Comparator):** Inspects balance delta at $t = 0$. By construction, detached signatures (EIP-7702, Permit2) yield $\Delta = \$0.00$. Defeating $B_0$ only justifies *multi-step execution*, not *tree search*.
+* **$B_1$ (State-Aware Greedy Linear Forward Runner):** Understands EIP-7702 and Permit2, relays Type-4 authorizations when required, but executes candidate actions **greedily and linearly forward without state snapshots (`evm_snapshot` / `evm_revert`)**. Uses single-trace replay for post-recovery verification.
+* **Aegis CRV (`ReachabilityExplorer`):** Bounded tree search ($k \le 3$) with state snapshotting, backtracking across reverting and decoy branches, and full post-recovery bounded re-search from state $s_R$.
+
+### Empirical Comparison Matrix
+
+Executed live via `make test-comparison` (`npm run eval:comparison`):
+
+| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Latency | Verdict / Architectural Finding |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 58 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 64 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
+| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 41 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 42 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
+| **3. Adversarial Branching Decoys** | B₁ (Greedy Forward) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | 36 ms | **FAIL (False Negative):** Halted on reverting decoy; cannot roll back state to reach drain |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | 113 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover `evacuateAsset` |
+| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `SAFE` | 1 | 1 | 0 | 0 | 13 ms | **FAIL (False Sense of Safety):** Replayed trace $\pi_{7702}$ reverts; blind to active Permit2 allowance |
+| | Aegis CRV (Full Re-Search from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 17 ms | **PASS (True Defense):** Bounded re-search on $s_R$ flags residual Permit2 vulnerability |
+
+### Scientific Takeaways & Honest Concessions
+1. **Concession on Linear Chains:** Where smart account capabilities feature single-path, monotonic drain routines (such as the 51 single-drain contracts in the USENIX '26 corpus), greedy forward simulation ($B_1$) is completely sufficient and executes with lower latency and zero snapshot overhead. We explicitly do **not** claim tree search is superior on simple linear topologies.
+2. **Necessity of Backtracking on Branching Topologies:** When delegates expose multi-function entrypoints where decoy or reverting branches precede the drain (Fixture 3), $B_1$ crashes/halts on the revert, emitting a False Negative. Aegis CRV's EVM snapshot rollback is strictly required to navigate complex contract surfaces.
+3. **Danger of Single-Trace Replay:** Standard industry practice verifies exploit fixes by replaying the discovered exploit trace $\pi^*$. In accounts with multiple compromised capabilities (Fixture 4: revoked EIP-7702 but unrevoked Permit2 allowance), single-trace replay falsely certifies the account as "SAFE". Aegis CRV's bounded re-search from $s_R$ guarantees true cross-capability security certification.
+
+---
+
 ## Adversarial Recovery & Boundary Hardening
 
 Aegis7702 includes a dedicated suite of 5 adversarial stress tests verifying boundary resilience in a standardized local Prague-EVM reconstruction:

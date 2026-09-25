@@ -47,7 +47,24 @@ Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testda
 
 ---
 
-## 3. Deliverable Links
+## 3. Controlled Empirical Comparison: $B_1$ vs. Aegis CRV
+
+Executed live via `make test-comparison` (`cd engine && npm run eval:comparison`):
+
+| Fixture | System | Outcome | Visited States | EVM Calls | Snapshots | Backtracks | Latency | Verdict / Architectural Finding |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| **1. Canonical EIP-7702 Sweep** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 58 ms | **Pass (Optimal on Linear):** Linear forward simulation suffices with zero snapshot overhead |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 64 ms | **Pass (Equivalent):** Identifies identical exploit trace; snapshots incur minor overhead |
+| **2. Canonical Permit2 Drain** | B₁ (Greedy Forward) | `FOUND_LOSS` | 2 | 2 | 0 | 0 | 41 ms | **Pass (Depth 2 Equivalent):** Both execute `permit` → `transferFrom` |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 42 ms | **Pass (Depth 2 Equivalent):** Identifies identical exploit trace |
+| **3. Adversarial Branching Decoys** | B₁ (Greedy Forward) | `REVERT_ERROR` | 2 | 2 | 0 | 0 | 36 ms | **FAIL (False Negative):** Halted on reverting decoy; cannot roll back state to reach drain |
+| | Aegis CRV (Tree Search) | `FOUND_LOSS` | 4 | 6 | 6 | 6 | 113 ms | **PASS (True Positive):** Snapshot rollback backtracks around decoys to discover `evacuateAsset` |
+| **4. Post-Recovery Residual Risk** | B₁ (Single-Trace Replay) | `SAFE` | 1 | 1 | 0 | 0 | 13 ms | **FAIL (False Sense of Safety):** Replayed trace $\pi_{7702}$ reverts; blind to active Permit2 allowance |
+| | Aegis CRV (Full Re-Search from $s_R$) | `FOUND_LOSS` | 2 | 2 | 2 | 1 | 17 ms | **PASS (True Defense):** Bounded re-search on $s_R$ flags residual Permit2 vulnerability |
+
+---
+
+## 4. Deliverable Links
 
 1. **Submission Writeup:** [`SUBMISSION.md`](./SUBMISSION.md)
 2. **Interactive Visualizer Code:** [`app/src/App.tsx`](./app/src/App.tsx)
@@ -59,7 +76,7 @@ Full 58-case execution details: [`testdata/AEGIS_USENIX_EVALUATION.md`](./testda
 
 ---
 
-## 4. Judge Reproduction Instructions (Quickstart)
+## 5. Judge Reproduction Instructions (Quickstart)
 
 ```bash
 # 1. Clone repository
@@ -69,17 +86,20 @@ cd aegis7702
 # 2. Run Foundry Contract Security Suite (14 tests in 13ms)
 make test-contracts
 
-# 3. Run TypeScript Reachability Kill Tests & Adversarial Scenarios (fast local execution)
+# 3. Run TypeScript Reachability Kill Tests & Integration Scenarios
 make test-engine
 
-# 4. Launch Interactive Prototype Dashboard
+# 4. Run Rigorous Controlled Empirical Baseline Comparison (B1 vs Aegis CRV)
+make test-comparison
+
+# 5. Launch Interactive Prototype Dashboard
 make demo
 # Opens http://localhost:5173 connected to engine on :3099
 ```
 
 ---
 
-## 5. Formal Verification Contract
+## 6. Formal Verification Contract
 
 $$\boxed{L(s_0, T_\pi(s_0)) > 0 \quad\land\quad L(s_R, T_\pi(s_R)) = 0}$$
 

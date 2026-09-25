@@ -11,6 +11,7 @@
     "test:decoupling": "tsx src/testActionProviderDecoupling.ts",
     "test": "npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration && npm run test:decoupling",
     "eval:usenix": "tsx src/evalUsenixReal.ts",
+    "eval:comparison": "tsx src/evalBaselineComparison.ts",
     "server": "tsx src/server.ts"
   },
   "keywords": [],

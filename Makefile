@@ -13,6 +13,9 @@ test-engine:
 test-benchmark:
 	cd engine && npm run eval:usenix
 
+test-comparison:
+	cd engine && npm run eval:comparison
+
 build:
 	cd contracts && forge build
 	cd app && npm run build
