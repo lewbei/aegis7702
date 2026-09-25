@@ -1,4 +1,4 @@
-import { Address, getAddress, verifyTypedData } from "viem";
+import { Address, getAddress, verifyTypedData, PublicClient } from "viem";
 import { recoverAuthorizationAddress } from "viem/experimental";
 import { Capability } from "./types.js";
 
@@ -13,10 +13,13 @@ export class CapabilityValidator {
    * Cryptographically validates the capability's digital signature and authority.
    * - For EIP-7702: recovers the authority address from the signed tuple (chainId, address, nonce, yParity, r, s)
    *   and verifies it matches the claimed owner.
-   * - For Permit2 Allowance: verifies the EIP-712 PermitSingle signature against claimed owner.
-   * - For Permit2 Signature: verifies the EIP-712 PermitTransferFrom signature against claimed owner.
+   * - For Permit2 Allowance: verifies the EIP-712 PermitSingle signature against claimed owner (supports EIP-1271 if publicClient is supplied).
+   * - For Permit2 Signature: verifies the EIP-712 PermitTransferFrom signature against claimed owner (supports EIP-1271 if publicClient is supplied).
    */
-  static async validate(capability: Capability): Promise<CapabilityValidationResult> {
+  static async validate(
+    capability: Capability,
+    publicClient?: PublicClient
+  ): Promise<CapabilityValidationResult> {
     try {
       if (capability.kind === "EIP7702") {
         const auth = {
@@ -78,19 +81,40 @@ export class CapabilityValidator {
           sigDeadline: capability.sigDeadline
         };
 
-        const isValid = await verifyTypedData({
-          address: capability.owner,
-          domain,
-          types,
-          primaryType: "PermitSingle",
-          message,
-          signature: capability.signature
-        });
+        let isValid = false;
+        if (publicClient) {
+          try {
+            isValid = await publicClient.verifyTypedData({
+              address: capability.owner,
+              domain,
+              types,
+              primaryType: "PermitSingle",
+              message,
+              signature: capability.signature
+            });
+          } catch {
+            isValid = false;
+          }
+        }
+        if (!isValid) {
+          try {
+            isValid = await verifyTypedData({
+              address: capability.owner,
+              domain,
+              types,
+              primaryType: "PermitSingle",
+              message,
+              signature: capability.signature
+            });
+          } catch {
+            isValid = false;
+          }
+        }
 
         if (!isValid) {
           return {
             valid: false,
-            reason: `Cryptographic signature verification failed: invalid PermitSingle EIP-712 signature for owner ${capability.owner}`
+            reason: `Cryptographic signature verification failed: invalid PermitSingle EIP-712/EIP-1271 signature for owner ${capability.owner}`
           };
         }
 
@@ -130,19 +154,40 @@ export class CapabilityValidator {
           deadline: capability.deadline
         };
 
-        const isValid = await verifyTypedData({
-          address: capability.owner,
-          domain,
-          types,
-          primaryType: "PermitTransferFrom",
-          message,
-          signature: capability.signature
-        });
+        let isValid = false;
+        if (publicClient) {
+          try {
+            isValid = await publicClient.verifyTypedData({
+              address: capability.owner,
+              domain,
+              types,
+              primaryType: "PermitTransferFrom",
+              message,
+              signature: capability.signature
+            });
+          } catch {
+            isValid = false;
+          }
+        }
+        if (!isValid) {
+          try {
+            isValid = await verifyTypedData({
+              address: capability.owner,
+              domain,
+              types,
+              primaryType: "PermitTransferFrom",
+              message,
+              signature: capability.signature
+            });
+          } catch {
+            isValid = false;
+          }
+        }
 
         if (!isValid) {
           return {
             valid: false,
-            reason: `Cryptographic signature verification failed: invalid PermitTransferFrom EIP-712 signature for owner ${capability.owner}`
+            reason: `Cryptographic signature verification failed: invalid PermitTransferFrom EIP-712/EIP-1271 signature for owner ${capability.owner}`
           };
         }
 

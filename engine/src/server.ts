@@ -427,6 +427,23 @@ async function handleAnalyze(body: any): Promise<any> {
 
     const recoveryPlan = await Permit2RecoveryPlanner.plan(capability, publicClient);
 
+    const [allowedAmount, , permitNonce] = await publicClient.readContract({
+      address: permit2Address,
+      abi: PERMIT2_ABI,
+      functionName: "allowance",
+      args: [victim, capability.details.token, capability.spender]
+    });
+
+    const authoritativePreconditions = {
+      accountAddress: victim,
+      permit2Address,
+      token: capability.details.token,
+      spender: capability.spender,
+      expectedPermitNonce: Number(permitNonce),
+      expectedAllowedAmount: allowedAmount.toString(),
+      chainId: Number(capability.chainId)
+    };
+
     sessions.set(runId, {
       scenarioId: requestedScenarioId,
       canonicalId,
@@ -446,6 +463,7 @@ async function handleAnalyze(body: any): Promise<any> {
       recoveryPlan,
       tokenAddress: usdcAddress,
       initialBalance: DRAIN_AMOUNT,
+      authoritativePreconditions,
       createdAt: Date.now()
     });
 
@@ -559,6 +577,22 @@ async function handleAnalyze(body: any): Promise<any> {
     const prospectiveRisk: ProspectiveRisk | null = null;
     const recoveryPlan = await Permit2SignatureRecoveryPlanner.plan(capability, publicClient);
 
+    const wordPos = capability.nonce >> 8n;
+    const currentWord: bigint = await publicClient.readContract({
+      address: permit2Address,
+      abi: PERMIT2_ABI,
+      functionName: "nonceBitmap",
+      args: [victim, wordPos]
+    });
+
+    const authoritativePreconditions = {
+      accountAddress: victim,
+      permit2Address,
+      wordPos: wordPos.toString(),
+      expectedNonceBitmapWord: currentWord.toString(),
+      chainId: Number(capability.chainId)
+    };
+
     sessions.set(runId, {
       scenarioId: requestedScenarioId,
       canonicalId,
@@ -578,6 +612,7 @@ async function handleAnalyze(body: any): Promise<any> {
       recoveryPlan,
       tokenAddress: usdcAddress,
       initialBalance: DRAIN_AMOUNT,
+      authoritativePreconditions,
       createdAt: Date.now()
     });
 
@@ -746,6 +781,20 @@ async function handleAnalyze(body: any): Promise<any> {
 
     const recoveryPlan = await EIP7702RecoveryPlanner.plan(capability, publicClient);
 
+    const actualAccountNonce = await publicClient.getTransactionCount({ address: victim });
+    const actualBytecode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
+    const actualActiveDelegation = Boolean(
+      actualBytecode.length >= 48 && actualBytecode.toLowerCase().startsWith("0xef0100")
+    );
+
+    const authoritativePreconditions = {
+      accountAddress: victim,
+      expectedAccountNonce: actualAccountNonce,
+      expectedBytecode: actualBytecode,
+      expectedActiveDelegation: actualActiveDelegation,
+      chainId: Number(capability.chainId)
+    };
+
     sessions.set(runId, {
       scenarioId: requestedScenarioId,
       canonicalId,
@@ -766,6 +815,7 @@ async function handleAnalyze(body: any): Promise<any> {
       tokenAddress: usdcAddress,
       delegateAddress,
       initialBalance: INITIAL_USDC,
+      authoritativePreconditions,
       createdAt: Date.now()
     });
 
@@ -923,6 +973,36 @@ async function handleAnalyze(body: any): Promise<any> {
 
     const recoveryPlan = await EIP7702RecoveryPlanner.plan(eip7702Cap, publicClient);
 
+    const actualAccountNonce = await publicClient.getTransactionCount({ address: victim });
+    const actualBytecode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
+    const actualActiveDelegation = Boolean(
+      actualBytecode.length >= 48 && actualBytecode.toLowerCase().startsWith("0xef0100")
+    );
+
+    const authoritativePreconditions: any = {
+      expectedAccountNonce: actualAccountNonce,
+      expectedBytecode: actualBytecode,
+      expectedActiveDelegation: actualActiveDelegation
+    };
+
+    if (permit2Address && usdcAddress && attacker) {
+      try {
+        const [actualAllowedAmount, , actualPermitNonce] = await publicClient.readContract({
+          address: permit2Address,
+          abi: PERMIT2_ABI,
+          functionName: "allowance",
+          args: [victim, usdcAddress, attacker]
+        });
+        authoritativePreconditions.expectedPermitNonce = actualPermitNonce;
+        authoritativePreconditions.expectedAllowedAmount = actualAllowedAmount;
+        authoritativePreconditions.token = usdcAddress;
+        authoritativePreconditions.spender = attacker;
+        authoritativePreconditions.permit2Address = permit2Address;
+      } catch {
+        // Permit2 not deployed in scenario
+      }
+    }
+
     sessions.set(runId, {
       scenarioId: requestedScenarioId,
       canonicalId,
@@ -943,6 +1023,7 @@ async function handleAnalyze(body: any): Promise<any> {
       tokenAddress: usdcAddress,
       delegateAddress,
       initialBalance: INITIAL_USDC,
+      authoritativePreconditions,
       createdAt: Date.now()
     });
 
@@ -989,100 +1070,125 @@ async function handleRecover(body: any): Promise<any> {
 
   const { victimWallet, publicClient, recoveryPlan, victim, canonicalId, victimAccount } = session;
 
+  const authPreconditions = session.authoritativePreconditions ?? {};
+  const effectiveAccountNonce = expectedAccountNonce !== undefined ? expectedAccountNonce : authPreconditions.expectedAccountNonce;
+  const effectiveActiveDelegation = expectedActiveDelegation !== undefined ? expectedActiveDelegation : authPreconditions.expectedActiveDelegation;
+  const effectiveBytecode = expectedBytecode !== undefined ? expectedBytecode : authPreconditions.expectedBytecode;
+  const effectivePermitNonce = expectedPermitNonce !== undefined ? expectedPermitNonce : authPreconditions.expectedPermitNonce;
+  const effectiveAllowedAmount = expectedAllowedAmount !== undefined ? expectedAllowedAmount : authPreconditions.expectedAllowedAmount;
+  const effectiveNonceBitmapWord = expectedNonceBitmapWord !== undefined ? expectedNonceBitmapWord : authPreconditions.expectedNonceBitmapWord;
+  const effectiveToken =
+    token ??
+    authPreconditions.token ??
+    (session.capability as any)?.details?.token ??
+    (session.capability as any)?.tokenAddress ??
+    (session.capability as any)?.permitted?.token ??
+    session.tokenAddress;
+  const effectiveSpender =
+    spender ??
+    authPreconditions.spender ??
+    (session.capability as any)?.spender ??
+    session.attacker;
+  const effectiveWordPos =
+    wordPos ??
+    authPreconditions.wordPos ??
+    ((session.capability as any)?.nonce !== undefined ? (session.capability as any).nonce >> 8n : undefined);
+  const effectivePermit2 =
+    body.permit2Address ??
+    (session.capability as any)?.permit2Address ??
+    authPreconditions.permit2Address ??
+    session.permit2Address;
+
   // Precondition Defense against State-Race Regressions
-  if (expectedAccountNonce !== undefined) {
+  if (effectiveAccountNonce !== undefined) {
     const actualNonce = await publicClient.getTransactionCount({ address: victim });
-    if (BigInt(actualNonce) !== BigInt(expectedAccountNonce)) {
+    if (BigInt(actualNonce) !== BigInt(effectiveAccountNonce)) {
       return {
         runId,
         status: "STATE_PRECONDITION_FAILED",
-        reason: `State race detected: on-chain account nonce changed from ${expectedAccountNonce} to ${actualNonce}. Recovery aborted to prevent state regression.`,
+        reason: `State race detected: on-chain account nonce changed from ${effectiveAccountNonce} to ${actualNonce}. Recovery aborted to prevent state regression.`,
         totalTxsExecuted: 0
       };
     }
   }
 
-  if (expectedActiveDelegation !== undefined) {
+  if (effectiveActiveDelegation !== undefined) {
     const actualCode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
     const currentlyDelegated = Boolean(
       actualCode.length >= 48 && actualCode.toLowerCase().startsWith("0xef0100")
     );
-    if (currentlyDelegated !== Boolean(expectedActiveDelegation)) {
+    if (currentlyDelegated !== Boolean(effectiveActiveDelegation)) {
       return {
         runId,
         status: "STATE_PRECONDITION_FAILED",
-        reason: `State race detected: on-chain delegation state changed (expected active: ${expectedActiveDelegation}, actual: ${currentlyDelegated}). Recovery aborted to prevent state regression.`,
+        reason: `State race detected: on-chain delegation state changed (expected active: ${effectiveActiveDelegation}, actual: ${currentlyDelegated}). Recovery aborted to prevent state regression.`,
         totalTxsExecuted: 0
       };
     }
   }
 
-  if (expectedBytecode !== undefined) {
+  if (effectiveBytecode !== undefined) {
     const actualCode = (await publicClient.getBytecode({ address: victim })) ?? "0x";
-    if (actualCode.toLowerCase() !== String(expectedBytecode).toLowerCase()) {
+    if (actualCode.toLowerCase() !== String(effectiveBytecode).toLowerCase()) {
       return {
         runId,
         status: "STATE_PRECONDITION_FAILED",
-        reason: `State race detected: on-chain account bytecode changed (expected: ${expectedBytecode}, actual: ${actualCode}). Recovery aborted to prevent state regression.`,
+        reason: `State race detected: on-chain account bytecode changed (expected: ${effectiveBytecode}, actual: ${actualCode}). Recovery aborted to prevent state regression.`,
         totalTxsExecuted: 0
       };
     }
   }
 
-  if (expectedPermitNonce !== undefined || expectedAllowedAmount !== undefined) {
-    const permit2 = (session.capability as any)?.permit2Address ?? body.permit2Address;
-    const tokenAddr = token ?? (session.capability as any)?.details?.token;
-    const spenderAddr = spender ?? (session.capability as any)?.spender;
-    if (permit2 && tokenAddr && spenderAddr) {
+  if (effectivePermitNonce !== undefined || effectiveAllowedAmount !== undefined) {
+    if (effectivePermit2 && effectiveToken && effectiveSpender) {
       const [actualAllowedAmount, , actualPermitNonce] = await publicClient.readContract({
-        address: permit2,
+        address: effectivePermit2,
         abi: PERMIT2_ABI,
         functionName: "allowance",
-        args: [victim, tokenAddr, spenderAddr]
+        args: [victim, effectiveToken, effectiveSpender]
       });
 
-      if (expectedPermitNonce !== undefined && BigInt(actualPermitNonce) !== BigInt(expectedPermitNonce)) {
+      if (effectivePermitNonce !== undefined && BigInt(actualPermitNonce) !== BigInt(effectivePermitNonce)) {
         return {
           runId,
           status: "STATE_PRECONDITION_FAILED",
-          reason: `State race detected: Permit2 allowance nonce changed from ${expectedPermitNonce} to ${actualPermitNonce}. Recovery aborted to prevent state regression.`,
+          reason: `State race detected: Permit2 allowance nonce changed from ${effectivePermitNonce} to ${actualPermitNonce}. Recovery aborted to prevent state regression.`,
           totalTxsExecuted: 0
         };
       }
 
-      if (expectedAllowedAmount !== undefined && BigInt(actualAllowedAmount) !== BigInt(expectedAllowedAmount)) {
+      if (effectiveAllowedAmount !== undefined && BigInt(actualAllowedAmount) !== BigInt(effectiveAllowedAmount)) {
         return {
           runId,
           status: "STATE_PRECONDITION_FAILED",
-          reason: `State race detected: Permit2 allowed amount changed from ${expectedAllowedAmount} to ${actualAllowedAmount}. Recovery aborted to prevent state regression.`,
+          reason: `State race detected: Permit2 allowed amount changed from ${effectiveAllowedAmount} to ${actualAllowedAmount}. Recovery aborted to prevent state regression.`,
           totalTxsExecuted: 0
         };
       }
     }
   }
 
-  if (expectedNonceBitmapWord !== undefined) {
-    const permit2 = (session.capability as any)?.permit2Address ?? body.permit2Address;
+  if (effectiveNonceBitmapWord !== undefined) {
     const calcWordPos =
-      wordPos !== undefined
-        ? BigInt(wordPos)
+      effectiveWordPos !== undefined
+        ? BigInt(effectiveWordPos)
         : (session.capability as any)?.nonce !== undefined
         ? (session.capability as any).nonce >> 8n
         : undefined;
 
-    if (permit2 && calcWordPos !== undefined) {
+    if (effectivePermit2 && calcWordPos !== undefined) {
       const actualWord: bigint = await publicClient.readContract({
-        address: permit2,
+        address: effectivePermit2,
         abi: PERMIT2_ABI,
         functionName: "nonceBitmap",
         args: [victim, calcWordPos]
       });
 
-      if (BigInt(actualWord) !== BigInt(expectedNonceBitmapWord)) {
+      if (BigInt(actualWord) !== BigInt(effectiveNonceBitmapWord)) {
         return {
           runId,
           status: "STATE_PRECONDITION_FAILED",
-          reason: `State race detected: Permit2 signature nonce bitmap word changed (expected: ${expectedNonceBitmapWord}, actual: ${actualWord}). Recovery aborted to prevent state regression.`,
+          reason: `State race detected: Permit2 signature nonce bitmap word changed (expected: ${effectiveNonceBitmapWord}, actual: ${actualWord}). Recovery aborted to prevent state regression.`,
           totalTxsExecuted: 0
         };
       }
@@ -1103,13 +1209,25 @@ async function handleRecover(body: any): Promise<any> {
       case "FUTURE_NONCE_MULTI_ADVANCE": {
         const txs = recoveryPlan.transactions ?? [{ to: victim, value: 0n, data: "0x" }];
         totalTxsExecuted = txs.length;
-        for (const tx of txs) {
+        for (let i = 0; i < txs.length; i++) {
+          const tx = txs[i];
           txHash = await victimWallet.sendTransaction({
             to: tx.to ?? victim,
             value: tx.value ?? 0n,
             data: tx.data ?? "0x"
           });
-          await publicClient.waitForTransactionReceipt({ hash: txHash });
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+          if (receipt.status !== "success") {
+            return {
+              runId,
+              status: "RECOVERY_PARTIAL_FAILURE",
+              message: `Recovery transaction ${i + 1}/${txs.length} reverted on-chain (txHash: ${txHash})`,
+              failedTxIndex: i,
+              totalTxsExecuted: i + 1,
+              txHash,
+              postRecoveryVerified: false
+            };
+          }
         }
         break;
       }
@@ -1126,7 +1244,18 @@ async function handleRecover(body: any): Promise<any> {
           to: victim,
           authorizationList: [recoveryAuth]
         });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
+        const clearReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        if (clearReceipt.status !== "success") {
+          return {
+            runId,
+            status: "RECOVERY_PARTIAL_FAILURE",
+            message: `Clear delegation transaction reverted on-chain (txHash: ${txHash})`,
+            failedTxIndex: 0,
+            totalTxsExecuted: 1,
+            txHash,
+            postRecoveryVerified: false
+          };
+        }
         totalTxsExecuted = 1;
         break;
       }
@@ -1151,13 +1280,25 @@ async function handleRecover(body: any): Promise<any> {
       { to: recoveryPlan.target, data: recoveryPlan.calldata, value: 0n }
     ];
     totalTxsExecuted = txs.length;
-    for (const tx of txs) {
+    for (let i = 0; i < txs.length; i++) {
+      const tx = txs[i];
       txHash = await victimWallet.sendTransaction({
         to: tx.to ?? recoveryPlan.target,
         data: tx.data ?? recoveryPlan.calldata,
         value: tx.value ?? 0n
       });
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status !== "success") {
+        return {
+          runId,
+          status: "RECOVERY_PARTIAL_FAILURE",
+          message: `Permit2 recovery transaction ${i + 1}/${txs.length} reverted on-chain (txHash: ${txHash})`,
+          failedTxIndex: i,
+          totalTxsExecuted: i + 1,
+          txHash,
+          postRecoveryVerified: false
+        };
+      }
     }
   }
 
@@ -1351,22 +1492,92 @@ async function handleReplay(body: any): Promise<any> {
     args: [victim]
   });
 
+  const assetsLost = session.initialBalance && session.initialBalance > finalBal ? session.initialBalance - finalBal : 0n;
+  const mitigated = assetsLost <= 0n;
+
   // Clean up anvil process and session
   anvilProcess.kill();
   sessions.delete(runId);
 
   return {
     runId,
-    mitigated: replayReverted,
+    mitigated,
+    reverted: replayReverted,
     failedStep,
-    revertError: revertError.slice(0, 100),
+    revertError: revertError ? revertError.slice(0, 100) : null,
     finalVictimBalance: `${formatUnits(finalBal, 6)} USDC`,
-    message: "Exploit replay reverted on-chain. Zero assets lost post-recovery."
+    assetsLost: assetsLost.toString(),
+    message: mitigated
+      ? (replayReverted ? "Exploit replay reverted on-chain. Zero assets lost post-recovery." : "Zero assets lost post-recovery.")
+      : `Replay exploit succeeded in draining funds (${formatUnits(assetsLost, 6)} USDC lost). Recovery was ineffective.`
   };
+}
+
+async function ensureContractsEtchedIfLocal(
+  publicClient: PublicClient,
+  capability: Capability,
+  forkUrl?: string
+) {
+  if (forkUrl) return;
+  const targetContract: Address | null =
+    capability.kind === "EIP7702"
+      ? capability.delegateAddress
+      : (capability as any).permit2Address ?? null;
+
+  if (targetContract && targetContract !== "0x0000000000000000000000000000000000000000") {
+    const code = await publicClient.getBytecode({ address: targetContract });
+    if (!code || code === "0x") {
+      if (capability.kind === "PERMIT2_ALLOWANCE" || capability.kind === "PERMIT2_SIGNATURE") {
+        try {
+          const permit2Artifact = JSON.parse(
+            fs.readFileSync(path.resolve(__dirname, "../../contracts/out/Permit2.sol/Permit2.json"), "utf8")
+          );
+          const deployedBytecode = permit2Artifact.deployedBytecode?.object ?? permit2Artifact.bytecode?.object;
+          if (deployedBytecode) {
+            await publicClient.request({
+              method: "anvil_setCode" as any,
+              params: [targetContract, deployedBytecode.startsWith("0x") ? deployedBytecode : `0x${deployedBytecode}`]
+            });
+          }
+        } catch {}
+      }
+    }
+  }
+
+  const tokenContract: Address | null =
+    capability.kind === "PERMIT2_ALLOWANCE"
+      ? capability.details.token
+      : capability.kind === "PERMIT2_SIGNATURE"
+      ? capability.permitted.token
+      : capability.kind === "EIP7702"
+      ? capability.targetToken ?? null
+      : null;
+
+  if (tokenContract && tokenContract !== "0x0000000000000000000000000000000000000000") {
+    const tokenCode = await publicClient.getBytecode({ address: tokenContract });
+    if (!tokenCode || tokenCode === "0x") {
+      try {
+        const usdcArtifact = JSON.parse(
+          fs.readFileSync(path.resolve(__dirname, "../../contracts/out/MockUSDC.sol/MockUSDC.json"), "utf8")
+        );
+        const deployedBytecode = usdcArtifact.deployedBytecode?.object ?? usdcArtifact.bytecode?.object;
+        if (deployedBytecode) {
+          await publicClient.request({
+            method: "anvil_setCode" as any,
+            params: [tokenContract, deployedBytecode.startsWith("0x") ? deployedBytecode : `0x${deployedBytecode}`]
+          });
+        }
+      } catch {}
+    }
+  }
 }
 
 async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildProcess }): Promise<any> {
   const { type, payload, attackerAddress, forkUrl: rawForkUrl, rpcUrl } = body;
+  const forkUrl = rawForkUrl || rpcUrl;
+  if (forkUrl) {
+    await validateForkUrl(forkUrl);
+  }
   if (!type || !payload) {
     throw new Error("Missing required fields: 'type' and 'payload' must be provided");
   }
@@ -1375,12 +1586,8 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
   const normType = String(type).toUpperCase().replace(/[-_]/g, "");
   if (normType === "EIP7702") {
     capability = decode7702(payload);
-    if (!capability.targetToken) {
-      capability.targetToken = body.tokenAddress
-        ? getAddress(body.tokenAddress)
-        : payload.targetToken
-        ? getAddress(payload.targetToken)
-        : "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // Default tracked asset
+    if (body.tokenAddress || payload.targetToken) {
+      capability.targetToken = getAddress(body.tokenAddress || payload.targetToken);
     }
   } else if (normType === "PERMIT2ALLOWANCE") {
     capability = decodePermit2Allowance(payload);
@@ -1390,9 +1597,29 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
     throw new Error(`Unsupported capability type: ${type}`);
   }
 
-  // 1. Cryptographic Signature & Authority Validation
-  const validation = await CapabilityValidator.validate(capability);
+  // 1. Initial Cryptographic Signature & Authority Validation
+  const fastValidation = await CapabilityValidator.validate(capability);
+  if (!fastValidation.valid) {
+    return {
+      status: "INVALID_CAPABILITY",
+      valid: false,
+      reason: fastValidation.reason,
+      counterexample: null,
+      prospectiveRisk: null
+    };
+  }
+
+  // 1. Spawn ephemeral Anvil instance for dynamic reachability analysis
+  const is7702 = capability.kind === "EIP7702";
+  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
+  if (ctx) ctx.anvilProcess = anvilProcess;
+  const anvilRpcUrl = `http://127.0.0.1:${anvilPort}`;
+  const publicClient = createPublicClient({ transport: viemHttp(anvilRpcUrl) });
+
+  // 2. Cryptographic Signature & Authority Validation (supports EIP-1271 contract wallets via publicClient)
+  const validation = await CapabilityValidator.validate(capability, publicClient);
   if (!validation.valid) {
+    anvilProcess.kill();
     return {
       status: "INVALID_CAPABILITY",
       valid: false,
@@ -1402,23 +1629,22 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
     };
   }
 
-  // 2. Spawn ephemeral Anvil instance for dynamic reachability analysis
-  const is7702 = capability.kind === "EIP7702";
-  const forkUrl = rawForkUrl || rpcUrl;
-  const { process: anvilProcess, port: anvilPort } = await startEphemeralAnvil(is7702 ? "prague" : undefined, forkUrl);
-  if (ctx) ctx.anvilProcess = anvilProcess;
-  const anvilRpcUrl = `http://127.0.0.1:${anvilPort}`;
-  const publicClient = createPublicClient({ transport: viemHttp(anvilRpcUrl) });
-  const attacker = attackerAddress ? getAddress(attackerAddress) : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+  const attacker = attackerAddress
+    ? getAddress(attackerAddress)
+    : (capability.kind === "PERMIT2_ALLOWANCE" || capability.kind === "PERMIT2_SIGNATURE")
+    ? getAddress(capability.spender)
+    : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
   try {
-    // 3. State-Source Validation: Verify state chainId matches capability chainId
+    // 3. State-Source Validation: Verify state chainId matches capability chainId (accepting chainId 0 for chain-agnostic EIP-7702)
     const stateChainId = await publicClient.getChainId();
-    if (BigInt(stateChainId) !== capability.chainId) {
+    if (capability.chainId !== 0n && BigInt(stateChainId) !== capability.chainId) {
       throw new Error(
         `State chainId mismatch: reconstructed EVM state has chainId ${stateChainId} but capability is signed for chainId ${capability.chainId}. Provide corresponding forkUrl.`
       );
     }
+
+    await ensureContractsEtchedIfLocal(publicClient, capability, forkUrl);
 
     // 4. Validate target contract availability on reconstructed state
     const targetContract: Address | null =
@@ -1433,6 +1659,18 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
           `Target contract at ${targetContract} is not deployed on reconstructed EVM state (chainId ${stateChainId}). Provide forkUrl parameter to reconstruct on-chain storage/bytecode.`
         );
       }
+    }
+
+    // Ensure targetToken is provided for EIP-7702 reachability exploration
+    if (capability.kind === "EIP7702" && !capability.targetToken) {
+      return {
+        status: "UNMODELED",
+        valid: true,
+        signer: validation.signer,
+        reason: "Missing target token: EIP-7702 reachability analysis requires an explicit tokenAddress to observe asset invariants",
+        counterexample: null,
+        prospectiveRisk: null
+      };
     }
 
     const explorer = new ReachabilityExplorer(
@@ -1483,6 +1721,30 @@ async function executeAnalyzeCapability(body: any, ctx?: { anvilProcess?: ChildP
           }
         };
       }
+    } else if (capability.kind === "PERMIT2_ALLOWANCE") {
+      try {
+        const [, , currentNonce] = await publicClient.readContract({
+          address: capability.permit2Address,
+          abi: PERMIT2_ABI,
+          functionName: "allowance",
+          args: [capability.owner, capability.details.token, capability.spender]
+        });
+        if (BigInt(currentNonce) < BigInt(capability.details.nonce)) {
+          status = "CONDITIONAL_RISK";
+          prospectiveRisk = {
+            condition: `Permit2 allowance signed for future nonce ${capability.details.nonce} (current on-chain: ${currentNonce})`,
+            candidateTrace: [],
+            projectedLoss: {
+              token: capability.details.token,
+              symbol: "TOKEN",
+              amount: capability.details.amount.toString(),
+              formatted: `${capability.details.amount}`
+            }
+          };
+        }
+      } catch {
+        // Read error or un-deployed
+      }
     }
 
     return {
@@ -1521,6 +1783,9 @@ async function handleAnalyzeCapability(body: any): Promise<any> {
 
 async function handleRecoveryPlan(body: any): Promise<any> {
   const { runId, type, payload, forkUrl } = body;
+  if (forkUrl) {
+    await validateForkUrl(forkUrl);
+  }
 
   // Case 1: Existing session referenced by runId
   if (runId) {
@@ -1686,11 +1951,20 @@ async function handleRecoveryPlan(body: any): Promise<any> {
   const publicClient = createPublicClient({ transport: viemHttp(rpcUrl) });
 
   try {
+    const stateChainId = await publicClient.getChainId();
+    if (capability.chainId !== 0n && BigInt(stateChainId) !== capability.chainId) {
+      throw new Error(
+        `State chainId mismatch: reconstructed EVM state has chainId ${stateChainId} but capability is signed for chainId ${capability.chainId}. Provide corresponding forkUrl.`
+      );
+    }
+
     const owner = capability.owner;
     const currentNonce = await publicClient.getTransactionCount({ address: owner });
     const currentBytecode = (await publicClient.getBytecode({ address: owner })) ?? "0x";
     const hasDelegation =
       currentBytecode.length >= 48 && currentBytecode.toLowerCase().startsWith("0xef0100");
+
+    await ensureContractsEtchedIfLocal(publicClient, capability, forkUrl);
 
     let recoveryPlan: any;
     if (capability.kind === "EIP7702") {
@@ -1712,7 +1986,7 @@ async function handleRecoveryPlan(body: any): Promise<any> {
           authorizationList: [
             {
               contractAddress: "0x0000000000000000000000000000000000000000",
-              chainId: Number(capability.chainId),
+              chainId: capability.chainId === 0n ? Number(stateChainId) : Number(capability.chainId),
               nonce: currentNonce + 1
             }
           ]

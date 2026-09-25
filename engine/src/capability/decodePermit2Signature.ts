@@ -23,19 +23,30 @@ export interface RawPermit2SignatureInput {
 /**
  * Decodes raw wallet EIP-712 PermitTransferFrom signing payload into a typed Permit2SignatureCapability.
  */
-export function decodePermit2Signature(input: RawPermit2SignatureInput): Permit2SignatureCapability {
-  if (!input.domain?.verifyingContract) {
+export function decodePermit2Signature(input: any): Permit2SignatureCapability {
+  const domain = input.domain ?? {
+    verifyingContract: input.permit2Address,
+    chainId: input.chainId
+  };
+  const message = input.message ?? {
+    permitted: input.permitted,
+    spender: input.spender,
+    nonce: input.nonce,
+    deadline: input.deadline
+  };
+
+  if (!domain?.verifyingContract) {
     throw new Error("Invalid Permit2 EIP-712 domain: missing verifyingContract");
   }
-  if (!input.message?.permitted?.token || !input.message?.spender) {
+  if (!message?.permitted?.token || !message?.spender) {
     throw new Error("Invalid Permit2 PermitTransferFrom message: missing token or spender");
   }
 
-  const chainId = BigInt(input.domain.chainId ?? 1);
-  const permit2Address = getAddress(input.domain.verifyingContract);
+  const chainId = BigInt(domain.chainId ?? input.chainId ?? 1);
+  const permit2Address = getAddress(domain.verifyingContract);
   const owner = getAddress(input.owner);
-  const spender = getAddress(input.message.spender);
-  const token = getAddress(input.message.permitted.token);
+  const spender = getAddress(message.spender);
+  const token = getAddress(message.permitted.token);
 
   return {
     kind: "PERMIT2_SIGNATURE",
@@ -44,11 +55,11 @@ export function decodePermit2Signature(input: RawPermit2SignatureInput): Permit2
     permit2Address,
     permitted: {
       token,
-      amount: BigInt(input.message.permitted.amount)
+      amount: BigInt(message.permitted.amount)
     },
     spender,
-    nonce: BigInt(input.message.nonce),
-    deadline: BigInt(input.message.deadline),
+    nonce: BigInt(message.nonce),
+    deadline: BigInt(message.deadline),
     signature: input.signature
   };
 }

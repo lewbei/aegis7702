@@ -13,7 +13,8 @@
     "test:integration": "tsx src/testIntegration.ts",
     "test:decoupling": "tsx src/testActionProviderDecoupling.ts",
     "test:multi-auditor": "tsx src/testMultiAuditor.ts",
-    "test": "npm run typecheck && npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration && npm run test:decoupling && npm run test:multi-auditor",
+    "test:soundness": "tsx src/testVerifierSoundness.ts",
+    "test": "npm run typecheck && npm run kill:allowance && npm run kill:signature && npm run kill:7702 && npm run test:integration && npm run test:decoupling && npm run test:multi-auditor && npm run test:soundness",
     "eval:usenix": "tsx src/evalUsenixReal.ts",
     "eval:comparison": "tsx src/evalBaselineComparison.ts",
     "server": "tsx src/server.ts"

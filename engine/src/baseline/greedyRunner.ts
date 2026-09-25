@@ -191,7 +191,7 @@ export class StateAwareGreedyRunner {
       from: action.actor,
       to: action.target,
       data: action.calldata,
-      gas: "0x100000"
+      gas: "0x1c9c380" // 30M gas (standard Anvil block gas limit)
     };
     if (action.authorizationList && action.authorizationList.length > 0) {
       txParams.authorizationList = action.authorizationList;

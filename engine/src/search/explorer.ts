@@ -117,30 +117,36 @@ export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
     let symbol = "TOKEN";
     let decimals = 18;
 
+    const code = await publicClient.getBytecode({ address: token });
+    if (!code || code === "0x") {
+      throw new Error(`Tracked token at ${token} has no deployed bytecode on EVM state`);
+    }
+
+    initialBalance = await publicClient.readContract({
+      address: token,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [owner]
+    });
+
     try {
-      const code = await publicClient.getBytecode({ address: token });
-      if (code && code !== "0x") {
-        initialBalance = await publicClient.readContract({
-          address: token,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [owner]
-        }).catch(() => 0n);
-
-        symbol = await publicClient.readContract({
-          address: token,
-          abi: ERC20_ABI,
-          functionName: "symbol"
-        }).catch(() => "TOKEN");
-
-        decimals = await publicClient.readContract({
-          address: token,
-          abi: ERC20_ABI,
-          functionName: "decimals"
-        }).catch(() => 18);
-      }
+      symbol = await publicClient.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "symbol"
+      });
     } catch {
-      // Contract un-deployed or does not implement ERC20 interface
+      symbol = "TOKEN";
+    }
+
+    try {
+      decimals = await publicClient.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "decimals"
+      });
+    } catch {
+      decimals = 18;
     }
 
     return { token, symbol, decimals, initialBalance };
@@ -151,17 +157,12 @@ export class ERC20LossOracle implements InvariantOracle<ERC20LossContext> {
     capability: Capability,
     publicClient: PublicClient
   ): Promise<InvariantViolation | null> {
-    let currentBalance = initialContext.initialBalance;
-    try {
-      currentBalance = await publicClient.readContract({
-        address: initialContext.token,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [capability.owner]
-      });
-    } catch {
-      currentBalance = initialContext.initialBalance;
-    }
+    const currentBalance = await publicClient.readContract({
+      address: initialContext.token,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [capability.owner]
+    });
 
     if (currentBalance < initialContext.initialBalance) {
       const lossAmount = initialContext.initialBalance - currentBalance;
@@ -304,7 +305,17 @@ export class ReachabilityExplorer {
       successfulActions: 0,
       revertingActions: 0
     };
-    const initialContext = await this.invariantOracle.snapshotInitial(capability, this.publicClient);
+    let initialContext: any;
+    try {
+      initialContext = await this.invariantOracle.snapshotInitial(capability, this.publicClient);
+    } catch (err: any) {
+      return {
+        status: "UNMODELED",
+        reason: `Initial state observation failed: ${err.message || err}`,
+        visitedStates: 0,
+        telemetry: this.telemetry
+      };
+    }
     const searchOutcome = await this.dfs(0, [], initialContext, capability, attacker);
     const finalTelemetry: SearchTelemetry = {
       ...this.telemetry,
@@ -384,66 +395,76 @@ export class ReachabilityExplorer {
         // 2. Execute candidate action
         await this.executeAction(action);
         this.telemetry.successfulActions++;
-
-        // 3. Inspect state after action execution via injected InvariantOracle
-        const violation = await this.invariantOracle.evaluate(
-          initialContext,
-          capability,
-          this.publicClient
-        );
-
-        if (this.invariantOracle.formatCurrentState) {
-          const stateStr = await this.invariantOracle.formatCurrentState(initialContext, capability, this.publicClient);
-          console.log(`       -> Executed [${action.id}]. Victim state: ${stateStr}`);
-        } else {
-          console.log(`       -> Executed [${action.id}]. Invariant violation: ${violation ? violation.formatted : "none"}`);
-        }
-
-        // Check if invariant broken
-        if (violation) {
-          // Counterexample found!
-          await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
-
-          return {
-            status: "FOUND_LOSS",
-            counterexample: {
-              capability: (capability as any).kind || "GENERIC_CAPABILITY",
-              owner,
-              attacker,
-              depth: depth + 1,
-              trace: [...trace, action],
-              loss: {
-                token: violation.token ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`),
-                symbol: violation.symbol,
-                amount: violation.amount,
-                formatted: violation.formatted
-              }
-            }
-          };
-        }
-
-        // 4. Recurse deeper
-        const deeperResult = await this.dfs(
-          depth + 1,
-          [...trace, action],
-          initialContext,
-          capability,
-          attacker
-        );
-
-        // 5. Backtrack
-        await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
-
-        if (deeperResult.status === "FOUND_LOSS") {
-          return deeperResult;
-        }
-        if (deeperResult.status === "UNMODELED") {
-          unmodeledReason = deeperResult.reason;
-        }
       } catch (err: any) {
         this.telemetry.revertingActions++;
         console.log(`       -> Action [${action.id}] reverted: ${err.message || err}`);
         await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
+        continue;
+      }
+
+      // 3. Inspect state after action execution via injected InvariantOracle
+      let violation: InvariantViolation | null = null;
+      try {
+        violation = await this.invariantOracle.evaluate(
+          initialContext,
+          capability,
+          this.publicClient
+        );
+      } catch (err: any) {
+        await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
+        return {
+          status: "UNMODELED",
+          reason: `Invariant oracle observation failed after action [${action.id}]: ${err.message || err}`
+        };
+      }
+
+      if (this.invariantOracle.formatCurrentState) {
+        const stateStr = await this.invariantOracle.formatCurrentState(initialContext, capability, this.publicClient).catch(() => "UNKNOWN");
+        console.log(`       -> Executed [${action.id}]. Victim state: ${stateStr}`);
+      } else {
+        console.log(`       -> Executed [${action.id}]. Invariant violation: ${violation ? violation.formatted : "none"}`);
+      }
+
+      // Check if invariant broken
+      if (violation) {
+        // Counterexample found!
+        await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
+
+        return {
+          status: "FOUND_LOSS",
+          counterexample: {
+            capability: (capability as any).kind || "GENERIC_CAPABILITY",
+            owner,
+            attacker,
+            depth: depth + 1,
+            trace: [...trace, action],
+            loss: {
+              token: violation.token ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`),
+              symbol: violation.symbol,
+              amount: violation.amount,
+              formatted: violation.formatted
+            }
+          }
+        };
+      }
+
+      // 4. Recurse deeper
+      const deeperResult = await this.dfs(
+        depth + 1,
+        [...trace, action],
+        initialContext,
+        capability,
+        attacker
+      );
+
+      // 5. Backtrack
+      await this.rpcClient.request({ method: "evm_revert", params: [snapshot] });
+
+      if (deeperResult.status === "FOUND_LOSS") {
+        return deeperResult;
+      }
+      if (deeperResult.status === "UNMODELED") {
+        unmodeledReason = deeperResult.reason;
       }
     }
 
@@ -472,7 +493,7 @@ export class ReachabilityExplorer {
       from: action.actor,
       to: action.target,
       data: action.calldata,
-      gas: "0x100000"
+      gas: "0x1c9c380" // 30M gas (standard Anvil block gas limit)
     };
     if (action.authorizationList && action.authorizationList.length > 0) {
       txParams.authorizationList = action.authorizationList;

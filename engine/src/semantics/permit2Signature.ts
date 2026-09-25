@@ -41,19 +41,27 @@ export class Permit2SignatureSemantics {
     const isNonceAvailable = (currentWord & bit) === 0n;
 
     // 2. Read victim's ERC20 balance and allowance to Permit2
-    const victimBalance: bigint = await client.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [owner]
-    }).catch(() => 0n);
-
-    const tokenApprovalToPermit2: bigint = await client.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [owner, permit2]
-    }).catch(() => 0n);
+    let victimBalance: bigint;
+    let tokenApprovalToPermit2: bigint;
+    try {
+      victimBalance = await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [owner]
+      });
+      tokenApprovalToPermit2 = await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [owner, permit2]
+      });
+    } catch (err: any) {
+      return {
+        status: "UNMODELED",
+        reason: `Failed to read ERC20 state for token ${token}: ${err.message || err}`
+      };
+    }
 
     // Action: permitTransferFrom
     if (isNonceAvailable && victimBalance > 0n && tokenApprovalToPermit2 > 0n) {

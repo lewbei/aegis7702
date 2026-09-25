@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { createPublicClient, http as viemHttp } from "viem";
+import { createPublicClient, http as viemHttp, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { signAuthorization } from "viem/experimental";
 
@@ -736,12 +736,167 @@ async function runIntegrationTests() {
     }
     console.log(`     ✓ Trust boundary enforced: server strictly audited session portfolio and discovered residual loss despite client sending capabilityPortfolio: [] (status=${spoofedRecoverData.postRecoveryExplore.status}, verified=${spoofedRecoverData.postRecoveryExplore.verified})`);
 
-    // Clean up overrideSession
-    await fetch(`${BASE_URL}/api/replay`, {
+    // Subtest 7I: Authoritative Server Preconditions Defense (client sends ONLY { runId })
+    console.log("  -> Subtest 7I: Authoritative Server Preconditions ({ runId } only rejects stale state with HTTP 409)...");
+    const staleAttemptRes = await fetch(`${BASE_URL}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId: overrideSession.runId })
+      body: JSON.stringify({ scenarioId: "eip7702" })
     });
+    if (!staleAttemptRes.ok) throw new Error(`Analyze for Subtest 7I failed: ${await staleAttemptRes.text()}`);
+    const staleSession = await staleAttemptRes.json();
+
+    // Out-of-band state mutation on victim's account (e.g. user performed external transaction)
+    const ephemeralClient = createPublicClient({ transport: viemHttp(`http://127.0.0.1:${staleSession.port}`) });
+    const victimEOA = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    const currentNonceBefore = await ephemeralClient.getTransactionCount({ address: victimEOA });
+    await ephemeralClient.request({
+      method: "anvil_setNonce" as any,
+      params: [victimEOA, `0x${(currentNonceBefore + 5).toString(16)}`] as any
+    });
+
+    // Client sends ONLY { runId }, with NO expected* fields (matching real UI behavior)
+    const staleRecoverRes = await fetch(`${BASE_URL}/api/recover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: staleSession.runId })
+    });
+    if (staleRecoverRes.status !== 409) {
+      throw new Error(`CRITICAL SOUNDNESS BUG: Expected HTTP 409 Conflict when client sends only { runId } on stale state, got HTTP ${staleRecoverRes.status}`);
+    }
+    const staleRecoverData = await staleRecoverRes.json();
+    if (staleRecoverData.status !== "STATE_PRECONDITION_FAILED") {
+      throw new Error(`Expected STATE_PRECONDITION_FAILED, got ${JSON.stringify(staleRecoverData)}`);
+    }
+    console.log(`     ✓ Authoritative server preconditions defended: HTTP 409 returned for { runId } only: status=${staleRecoverData.status}, reason="${staleRecoverData.reason}"`);
+
+    // Subtest 7J: Arbitrary Permit2 future nonce detection (CONDITIONAL_RISK)
+    console.log("  -> Subtest 7J: Arbitrary Permit2 future nonce detection (CONDITIONAL_RISK)...");
+    const futurePermit2Payload = {
+      owner: testAccount.address,
+      spender: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      permit2Address: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      details: {
+        token: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        amount: parseUnits("5000", 6).toString(),
+        expiration: (Math.floor(Date.now() / 1000) + 86400).toString(),
+        nonce: "999" // Future nonce on chain
+      },
+      sigDeadline: (Math.floor(Date.now() / 1000) + 3600).toString()
+    };
+    const futureP2TypeData = {
+      types: {
+        PermitDetails: [
+          { name: "token", type: "address" },
+          { name: "amount", type: "uint160" },
+          { name: "expiration", type: "uint48" },
+          { name: "nonce", type: "uint48" }
+        ],
+        PermitSingle: [
+          { name: "details", type: "PermitDetails" },
+          { name: "spender", type: "address" },
+          { name: "sigDeadline", type: "uint256" }
+        ]
+      },
+      primaryType: "PermitSingle" as const,
+      domain: { name: "Permit2", chainId: 31337, verifyingContract: futurePermit2Payload.permit2Address },
+      message: {
+        details: {
+          token: futurePermit2Payload.details.token,
+          amount: BigInt(futurePermit2Payload.details.amount),
+          expiration: Number(futurePermit2Payload.details.expiration),
+          nonce: Number(futurePermit2Payload.details.nonce)
+        },
+        spender: futurePermit2Payload.spender,
+        sigDeadline: BigInt(futurePermit2Payload.sigDeadline)
+      }
+    };
+    const futureP2Sig = await testAccount.signTypedData(futureP2TypeData);
+
+    const futureP2Res = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "PERMIT2_ALLOWANCE",
+        payload: {
+          owner: testAccount.address,
+          spender: futurePermit2Payload.spender,
+          permit2Address: futurePermit2Payload.permit2Address,
+          chainId: 31337,
+          details: {
+            token: futurePermit2Payload.details.token,
+            amount: futurePermit2Payload.details.amount,
+            expiration: futurePermit2Payload.details.expiration,
+            nonce: futurePermit2Payload.details.nonce
+          },
+          sigDeadline: futurePermit2Payload.sigDeadline,
+          signature: futureP2Sig
+        }
+      })
+    });
+    if (!futureP2Res.ok) throw new Error(`Analyze future Permit2 capability failed: ${await futureP2Res.text()}`);
+    const futureP2Data = await futureP2Res.json();
+    if (futureP2Data.status !== "CONDITIONAL_RISK" || !futureP2Data.prospectiveRisk) {
+      throw new Error(`Expected CONDITIONAL_RISK for future Permit2 nonce, got: ${JSON.stringify(futureP2Data)}`);
+    }
+    console.log(`     ✓ Arbitrary Permit2 future nonce classified as CONDITIONAL_RISK: condition="${futureP2Data.prospectiveRisk.condition}"`);
+
+    // Subtest 7K: EIP-7702 chainId = 0 Cross-Chain Compatibility
+    console.log("  -> Subtest 7K: EIP-7702 chainId = 0 Cross-Chain Compatibility...");
+    const localClient = createPublicClient({ transport: viemHttp("http://127.0.0.1:8545") });
+    const chainZeroAuth = await signAuthorization(localClient, {
+      account: testAccount,
+      contractAddress: "0x0000000000000000000000000000000000000000",
+      chainId: 0, // Cross-chain valid authorization tuple
+      nonce: 0
+    });
+    const chainZeroRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        tokenAddress: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        payload: {
+          owner: testAccount.address,
+          address: chainZeroAuth.address,
+          chainId: 0,
+          nonce: chainZeroAuth.nonce,
+          yParity: chainZeroAuth.yParity,
+          r: chainZeroAuth.r,
+          s: chainZeroAuth.s
+        }
+      })
+    });
+    if (!chainZeroRes.ok) throw new Error(`Analyze chainId=0 capability failed: ${await chainZeroRes.text()}`);
+    const chainZeroData = await chainZeroRes.json();
+    if (chainZeroData.status === "INVALID_CAPABILITY") {
+      throw new Error(`CRITICAL PROTOCOL BUG: chainId=0 was rejected as invalid capability: ${JSON.stringify(chainZeroData)}`);
+    }
+    console.log(`     ✓ EIP-7702 authorization with chainId = 0 accepted without chainId mismatch: status=${chainZeroData.status}`);
+
+    // Subtest 7L: Missing targetToken for EIP-7702 yields UNMODELED (no silent Mainnet USDC fallback)
+    console.log("  -> Subtest 7L: EIP-7702 missing targetToken yields UNMODELED (no silent USDC fallback)...");
+    const missingTokenRes = await fetch(`${BASE_URL}/api/analyze-capability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "EIP7702",
+        payload: {
+          owner: testAccount.address,
+          address: validAuth.address,
+          chainId: validAuth.chainId,
+          nonce: validAuth.nonce,
+          yParity: validAuth.yParity,
+          r: validAuth.r,
+          s: validAuth.s
+        }
+      })
+    });
+    const missingTokenData = await missingTokenRes.json();
+    if (missingTokenData.status !== "UNMODELED") {
+      throw new Error(`CRITICAL SOUNDNESS BUG: Missing target token must return UNMODELED, got ${missingTokenData.status}`);
+    }
+    console.log(`     ✓ Missing targetToken correctly returned UNMODELED: reason="${missingTokenData.reason}"`);
 
     console.log("\n================================================================================");
     console.log("🎉 ALL CANONICAL & ADVERSARIAL INTEGRATION TESTS PASSED 100% ON LIVE FORK");

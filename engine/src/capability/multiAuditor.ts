@@ -125,7 +125,12 @@ export class MultiCapabilityAuditor {
           }
         );
 
-        const exploreResult = await explorer.explore(capability, attacker);
+        const effectiveActor =
+          capability.kind === "PERMIT2_ALLOWANCE" || capability.kind === "PERMIT2_SIGNATURE"
+            ? capability.spender
+            : attacker;
+
+        const exploreResult = await explorer.explore(capability, effectiveActor);
         totalVisited += exploreResult.visitedStates;
 
         if (exploreResult.status === "FOUND_LOSS") {

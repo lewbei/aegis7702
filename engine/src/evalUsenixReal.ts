@@ -111,12 +111,20 @@ function compareTraces(traceA: Action[], traceB: Action[]): boolean {
   for (let i = 0; i < traceA.length; i++) {
     const a = traceA[i];
     const b = traceB[i];
+    if (a.actor.toLowerCase() !== b.actor.toLowerCase()) return false;
     if (a.target.toLowerCase() !== b.target.toLowerCase()) return false;
     if (a.calldata.toLowerCase() !== b.calldata.toLowerCase()) return false;
     if (a.value !== b.value) return false;
     const authA = a.authorizationList || [];
     const authB = b.authorizationList || [];
     if (authA.length !== authB.length) return false;
+    for (let j = 0; j < authA.length; j++) {
+      const itemA = authA[j];
+      const itemB = authB[j];
+      if (itemA.chainId !== itemB.chainId) return false;
+      if (itemA.address.toLowerCase() !== itemB.address.toLowerCase()) return false;
+      if (itemA.nonce !== itemB.nonce) return false;
+    }
   }
   return true;
 }
@@ -174,21 +182,33 @@ async function replayTraceAgainstStateSnapshot(
   const snap = (await publicClient.request({ method: "evm_snapshot" } as any)) as Hex;
   try {
     for (const step of trace) {
-      if (step.authorizationList && step.authorizationList.length > 0) {
-        const tx = await attackerWallet.sendTransaction({
-          to: step.target,
-          authorizationList: step.authorizationList
-        });
-        await publicClient.waitForTransactionReceipt({ hash: tx });
-      } else {
-        const tx = await attackerWallet.sendTransaction({
-          to: step.target,
-          data: step.calldata,
-          value: step.value
-        });
-        await publicClient.waitForTransactionReceipt({ hash: tx });
+      try {
+        if (step.authorizationList && step.authorizationList.length > 0) {
+          const tx = await attackerWallet.sendTransaction({
+            to: step.target,
+            authorizationList: step.authorizationList
+          });
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+          if (receipt.status !== "success") {
+            break;
+          }
+        } else {
+          const tx = await attackerWallet.sendTransaction({
+            to: step.target,
+            data: step.calldata,
+            value: step.value
+          });
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+          if (receipt.status !== "success") {
+            break;
+          }
+        }
+      } catch {
+        // Transaction execution rejected or reverted by EVM
+        break;
       }
     }
+
     const balAfter = await publicClient.readContract({
       address: usdcAddress,
       abi: ERC20_ABI,
@@ -196,8 +216,10 @@ async function replayTraceAgainstStateSnapshot(
       args: [victim]
     });
     return balAfter === initialBalance;
-  } catch {
-    return true;
+  } catch (err: any) {
+    // Infrastructure/RPC failure reading state or snapshotting: do NOT treat as success!
+    console.error(`Replay verification infrastructure error: ${err.message || err}`);
+    return false;
   } finally {
     await publicClient.request({ method: "evm_revert", params: [snap] } as any);
   }
@@ -822,5 +844,8 @@ To establish the exact boundary where tree search provides structural capability
 }
 
 if (process.argv[1] && process.argv[1].endsWith("evalUsenixReal.ts")) {
-  runUsenixEvaluation().catch(console.error);
+  runUsenixEvaluation().catch((err) => {
+    console.error("FATAL ERROR in USENIX EVALUATION:", err);
+    process.exit(1);
+  });
 }

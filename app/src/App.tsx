@@ -333,6 +333,15 @@ export function App() {
           body: JSON.stringify({ runId: activeRunId })
         });
         const recData = await recRes.json();
+        if (!recRes.ok || recData.status === "STATE_PRECONDITION_FAILED" || recData.status === "RECOVERY_PARTIAL_FAILURE") {
+          setIsRecovering(false);
+          setRecoveryDone(true);
+          setRealReplayResult({
+            mitigated: false,
+            message: `Recovery aborted (HTTP ${recRes.status}): ${recData.reason || recData.message || "State precondition conflict"}`
+          });
+          return;
+        }
         setRealRecoveryTx({ txHash: recData.txHash, gasUsed: recData.gasUsed });
 
         const repRes = await fetch('/api/replay', {

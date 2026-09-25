@@ -34,19 +34,27 @@ export class Permit2AllowanceSemantics {
     }
 
     // 2. Read victim's ERC20 balance and allowance to Permit2
-    const victimBalance = await client.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [owner]
-    }).catch(() => 0n);
-
-    const tokenApprovalToPermit2 = await client.readContract({
-      address: token,
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [owner, permit2]
-    }).catch(() => 0n);
+    let victimBalance: bigint;
+    let tokenApprovalToPermit2: bigint;
+    try {
+      victimBalance = await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [owner]
+      });
+      tokenApprovalToPermit2 = await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [owner, permit2]
+      });
+    } catch (err: any) {
+      return {
+        status: "UNMODELED",
+        reason: `Failed to read ERC20 state for token ${token}: ${err.message || err}`
+      };
+    }
 
     // Action Type 1: Can the attacker submit the PermitSingle?
     // Valid if current on-chain nonce matches signed nonce

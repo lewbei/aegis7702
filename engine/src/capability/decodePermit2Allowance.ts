@@ -31,19 +31,29 @@ export interface RawPermit2AllowanceInput {
 /**
  * Decodes raw wallet EIP-712 PermitSingle signing payload into a typed Permit2AllowanceCapability.
  */
-export function decodePermit2Allowance(input: RawPermit2AllowanceInput): Permit2AllowanceCapability {
-  if (!input.domain?.verifyingContract) {
+export function decodePermit2Allowance(input: any): Permit2AllowanceCapability {
+  const domain = input.domain ?? {
+    verifyingContract: input.permit2Address,
+    chainId: input.chainId
+  };
+  const message = input.message ?? {
+    details: input.details,
+    spender: input.spender,
+    sigDeadline: input.sigDeadline
+  };
+
+  if (!domain?.verifyingContract) {
     throw new Error("Invalid Permit2 EIP-712 domain: missing verifyingContract");
   }
-  if (!input.message?.details?.token || !input.message?.spender) {
+  if (!message?.details?.token || !message?.spender) {
     throw new Error("Invalid Permit2 PermitSingle message: missing token or spender");
   }
 
-  const chainId = BigInt(input.domain.chainId ?? 1);
-  const permit2Address = getAddress(input.domain.verifyingContract);
+  const chainId = BigInt(domain.chainId ?? input.chainId ?? 1);
+  const permit2Address = getAddress(domain.verifyingContract);
   const owner = getAddress(input.owner);
-  const spender = getAddress(input.message.spender);
-  const token = getAddress(input.message.details.token);
+  const spender = getAddress(message.spender);
+  const token = getAddress(message.details.token);
 
   return {
     kind: "PERMIT2_ALLOWANCE",
@@ -52,12 +62,12 @@ export function decodePermit2Allowance(input: RawPermit2AllowanceInput): Permit2
     permit2Address,
     details: {
       token,
-      amount: BigInt(input.message.details.amount),
-      expiration: Number(input.message.details.expiration),
-      nonce: Number(input.message.details.nonce)
+      amount: BigInt(message.details.amount),
+      expiration: Number(message.details.expiration),
+      nonce: Number(message.details.nonce)
     },
     spender,
-    sigDeadline: BigInt(input.message.sigDeadline),
+    sigDeadline: BigInt(message.sigDeadline),
     signature: input.signature
   };
 }

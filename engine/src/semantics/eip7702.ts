@@ -203,15 +203,24 @@ export class EIP7702Semantics {
     const token = capability.targetToken;
 
     // 1. Inspect on-chain state of the victim EOA
-    const currentNonce = await client.getTransactionCount({ address: owner });
-    const currentBytecode = await client.getBytecode({ address: owner });
+    let currentNonce: number;
+    let currentBytecode: `0x${string}` | undefined;
+    try {
+      currentNonce = await client.getTransactionCount({ address: owner });
+      currentBytecode = await client.getBytecode({ address: owner });
+    } catch (err: any) {
+      return {
+        status: "UNMODELED",
+        reason: `Failed to read on-chain state for victim EOA ${owner}: ${err.message || err}`
+      };
+    }
 
     const hasDelegation =
       currentBytecode &&
       currentBytecode.length >= 48 &&
       currentBytecode.toLowerCase().startsWith("0xef0100");
 
-    const delegateAddress = hasDelegation
+    const delegateAddress = hasDelegation && currentBytecode
       ? (("0x" + currentBytecode.slice(8, 48)) as Address)
       : capability.delegateAddress;
 
@@ -258,16 +267,31 @@ export class EIP7702Semantics {
     // Legal if delegation is currently installed on victim EOA and victim holds assets
     let victimBalance = 0n;
     if (token) {
-      victimBalance = await client.readContract({
-        address: token,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [owner]
-      }).catch(() => 0n);
+      try {
+        victimBalance = await client.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [owner]
+        });
+      } catch (err: any) {
+        return {
+          status: "UNMODELED",
+          reason: `Failed to read ERC20 balanceOf for token ${token}: ${err.message || err}`
+        };
+      }
     }
 
     if (hasDelegation && token && victimBalance > 0n) {
-      const delegateCode = ((await client.getBytecode({ address: delegateAddress })) || "").toLowerCase();
+      let delegateCode = "";
+      try {
+        delegateCode = ((await client.getBytecode({ address: delegateAddress })) || "").toLowerCase();
+      } catch (err: any) {
+        return {
+          status: "UNMODELED",
+          reason: `Failed to read delegate bytecode at ${delegateAddress}: ${err.message || err}`
+        };
+      }
       for (const family of MODELED_DRAIN_FAMILIES) {
         if (delegateCode.includes(family.selector)) {
           actions.push(...family.buildActions({ owner, attacker, token, victimBalance }));
