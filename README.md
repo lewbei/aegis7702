@@ -15,6 +15,7 @@
 
 ## 🎬 Presentation Showcase & Official Video Demo
 
+- 📺 **Watch on YouTube:** [https://youtu.be/lUrXpTSM36Q](https://youtu.be/lUrXpTSM36Q)
 - 🎥 **Final Voiceover Demo Video**: [`showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4`](./showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4) (1080p Full HD, 4m 44s, narrated walkthrough with subtitles)
 - 🖼️ **Official 10-Slide Pitch Deck**: [`showcase/README.md`](./showcase/README.md) (Full slide visuals, narrative takeaways, and architecture diagrams)
 - 🖥️ **Interactive Offline Judge Demo**: [`app/public/judge-demo.html`](./app/public/judge-demo.html) or `http://localhost:5173/` via `make demo`
@@ -59,9 +60,10 @@ make demo             # Launches engine API (:3099) & Vite UI (:5173)
 ### 🖥️ Standalone Offline Judge Walkthrough & Demo Video
 For judges seeking an instant, zero-setup interactive presentation or guided video demonstration without running local Anvil/Node processes:
 - **Interactive Offline Walkthrough**: Open [`app/public/judge-demo.html`](./app/public/judge-demo.html) directly in any web browser, or navigate to `http://localhost:5173/judge-demo.html` after running `make demo`.
-- **Automated 1080p Walkthrough Video**: Render or watch the comprehensive 76-second video walkthrough covering all three threat-recovery scenarios:
-  - Pre-rendered MP4 artifact: [`docs/aegis7702-demo-walkthrough.mp4`](./docs/aegis7702-demo-walkthrough.mp4) (or in Downloads)
-  - One-click regeneration: `make video` (executes [`scripts/render_demo_video.py`](./scripts/render_demo_video.py) using headless browser viewport captures and OpenCV composition)
+- **Official Walkthrough & Demo Video**:
+  - 📺 **Watch on YouTube:** [https://youtu.be/lUrXpTSM36Q](https://youtu.be/lUrXpTSM36Q)
+  - 💾 **Repository Video:** [`showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4`](./showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4) (1080p Full HD, 4m 44s, full narration & subtitles)
+  - One-click local regeneration of automated walkthrough: `make video` (executes [`scripts/render_demo_video.py`](./scripts/render_demo_video.py))
 - Review the accompanying presentation script in [`docs/WEBSITE_DEMO_SCRIPT.md`](./docs/WEBSITE_DEMO_SCRIPT.md) and preview snapshot in [`docs/desktop-preview.png`](./docs/desktop-preview.png).
 - This interactive walkthrough steps through the 3 modeled capability families (EIP-7702 Delegation, Permit2 Allowance, Permit2 Signature Transfer) showing the signing moment, loss branch, separate pre-loss state recovery branch, and neutralization replay checks.
 

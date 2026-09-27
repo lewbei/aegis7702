@@ -1,7 +1,9 @@
 # Aegis7702: Bounded Capability-Reachability Verifier & Recovery Engine
 
 **Project Name:** Aegis7702  
-**Tagline / Elevator Pitch:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability in a local EVM environment and synthesizes verified 1-click on-chain recovery.
+**Tagline / Elevator Pitch:** Catches zero-delta deferred drains in EIP-7702 & Permit2 signatures. Aegis7702 verifies multi-step capability reachability in a local EVM environment and synthesizes verified 1-click on-chain recovery.  
+**Video Demo (YouTube):** [https://youtu.be/lUrXpTSM36Q](https://youtu.be/lUrXpTSM36Q)  
+**Showcase & Pitch Deck:** [`showcase/README.md`](./showcase/README.md)
 
 ---
 

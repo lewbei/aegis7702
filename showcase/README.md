@@ -7,8 +7,9 @@
 
 ## 🎥 Final Demo Walkthrough (Voiceover & Captions)
 
-The official final presentation video walkthrough is archived directly in this repository:
-- **Video File:** [`showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4`](./Aegis7702_Final_Demo_Voiceover_Captioned.mp4)
+The official final presentation video walkthrough is available on YouTube and archived directly in this repository:
+- 📺 **Watch on YouTube:** [https://youtu.be/lUrXpTSM36Q](https://youtu.be/lUrXpTSM36Q)
+- 💾 **Repository Video:** [`showcase/Aegis7702_Final_Demo_Voiceover_Captioned.mp4`](./Aegis7702_Final_Demo_Voiceover_Captioned.mp4)
 - **Format:** 1080p Full HD (`1920 × 1080`), 25 FPS, 4m 44s, with full voiceover narration and synced subtitles.
 
 ---
