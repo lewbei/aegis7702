@@ -242,3 +242,21 @@ Aegis7702 includes a dedicated suite of adversarial stress tests verifying bound
    Integrate direct JSON-RPC bundling to Flashbots Protect and private builders, enabling the dashboard's "1-Click Recovery" button to automatically dispatch prioritized MEV bundles that eliminate mempool frontrunning risk.
 4. **Symbolic EVM Execution & SMT Integration:**
    Explore integrating symbolic EVM execution engines (such as Halmos or Certora Prover) to prove capability safety beyond bounded depth $k \le 3$, moving towards formal unbounded verification of smart account capabilities.
+
+---
+
+## AI Transparency & Model Disclosure
+
+### 1. Core Verification Engine: 0% LLM / 100% Deterministic EVM Execution
+- **Zero Hallucination Guarantee:** The core verification engine, capability decoders, legal action space generators, and proactive state-recovery synthesizers operate **completely free of Large Language Models (LLMs) or probabilistic AI prediction**.
+- Aegis7702 is a deterministic, typed capability-reachability verifier executing directly against local Prague EVM state snapshots (Anvil). All loss witnesses, exploit traces, and recovery plans are derived via bounded depth-first search ($k \le 3$) and concrete EVM execution backed by on-chain revert assertions.
+
+### 2. Development, Governance & Assisting AI Models
+In full compliance with hackathon AI assistance transparency rules:
+- **Governance & Verification Gatekeeper:**
+  - [**TruthGate 1.0**](https://github.com/satangel2222/truthgate) was enforced throughout engineering as an autonomous deterministic physical gatekeeper to audit git diffs, ensure fail-closed invariants, and mandate verifiable test execution proofs.
+- **AI Models Utilized as Development Accelerators:**
+  - **Gemini 3.8 Flash** (via Google Antigravity): Coding copilot, test suite engineering, build automation, and live Anvil orchestration.
+  - **ChatGPT Web (GPT 5.6 Sol)**: Architectural design reviews, threat modeling, presentation ideation, and USENIX paper empirical synthesis.
+  - **Neural Speech & Headless Automation:** Voiceover narration synthesis and automated 1080p demo video recording (`scripts/render_demo_video.py`).
+- **Human Authorship & Audit:** All smart contracts, cryptographic invariants, and reachability algorithms were designed, tested, and validated with 100% reproducible test suites.

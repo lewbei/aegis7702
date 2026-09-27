@@ -306,3 +306,22 @@ Every verified capability counterexample satisfies:
 ## 7. Research & Safety Disclaimer
 
 *Aegis7702 is a hackathon research prototype and bounded reachability verifier. While recovery transactions deterministically neutralize exploit replays on ephemeral EVM snapshots, live mainnet mitigations operate in adversarial mempools subject to miner extraction and gas auction dynamics. In live production environments, recovery transactions should be dispatched via private RPC endpoints (e.g., Flashbots Protect).*
+
+---
+
+## 8. 🤖 AI Transparency & Model Disclosure
+
+### 1. Core Verification Engine: 0% LLM / 100% Deterministic EVM Execution
+- **Aegis7702's core verification, action generation, and state-recovery engines do NOT use any Large Language Model (LLM) or probabilistic AI model.**
+- Smart contract security cannot rely on probabilistic text hallucinations. Aegis7702 operates strictly as a **deterministic, typed capability-reachability verifier** executing directly against local Prague EVM bytecode and state snapshots (Anvil).
+- All loss witnesses, exploit traces, and recovery plans are derived via **bounded depth-first state exploration ($k \le 3$) and concrete EVM execution**, backed by mathematical stopping criteria and on-chain revert assertions.
+
+### 2. Development, Governance & AI Assistance Disclosure
+In accordance with hackathon transparency and AI disclosure guidelines, the development and presentation workflow utilized the following AI models and governance systems:
+- **Metacognitive Governance & Verification Gatekeeper:**
+  - [**TruthGate 1.0**](https://github.com/satangel2222/truthgate) was enforced across all development and audit iterations as a deterministic physical gatekeeper to mandate test-first evidence, verify exit codes, enforce fail-closed invariants, and prevent hallucinated closures.
+- **AI Models & Assisting Systems:**
+  - **Gemini 3.8 Flash** (via Google Antigravity): Coding copilot, test suite engineering, build automation, and live Anvil orchestration.
+  - **ChatGPT Web (GPT 5.6 Sol)**: Architectural design reviews, threat modeling, presentation ideation, and USENIX paper empirical synthesis.
+  - **Neural TTS & Headless Chromium**: Voiceover synthesis and automated 1080p demo video frame capture (`scripts/render_demo_video.py`).
+- **Core Security Logic:** All capability decoders, reachability search algorithms, Sentinel contracts, and USENIX benchmark execution harnesses were designed, verified, and audited with 100% reproducible test suites.

@@ -99,3 +99,11 @@ The following 10 slides form the official presentation slide deck for hackathon 
 - **Standalone Offline Judge Walkthrough:** [`app/public/judge-demo.html`](../app/public/judge-demo.html)
 - **Three-Minute Presentation Script:** [`docs/WEBSITE_DEMO_SCRIPT.md`](../docs/WEBSITE_DEMO_SCRIPT.md)
 - **USENIX 58-Case Evaluation Matrix:** [`testdata/AEGIS_USENIX_EVALUATION.md`](../testdata/AEGIS_USENIX_EVALUATION.md)
+
+---
+
+## 🤖 AI Transparency & Model Disclosure
+
+- **Core Verification Engine:** **0% LLM / 100% Deterministic EVM Execution**. Pure Anvil state exploration, Viem typed decoders, and Solidity contracts. No probabilistic AI model is in the verification loop.
+- **Metacognitive Governance:** [**TruthGate 1.0**](https://github.com/satangel2222/truthgate) was enforced throughout engineering as an autonomous deterministic physical gatekeeper to audit git diffs, ensure fail-closed invariants, and mandate verifiable test execution proofs.
+- **Assisting AI Models (Development Accelerators):** **Gemini 3.8 Flash** (Google Antigravity) for test/code engineering; **ChatGPT Web (GPT 5.6 Sol)** for architectural reviews, threat modeling, and presentation ideation.
