@@ -32,3 +32,4 @@ broadcast/
 
 # Superego
 .superego/
+.aegis-ui-backups/

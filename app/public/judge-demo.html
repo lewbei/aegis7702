@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/aegis-mark.svg">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#091310">
+<meta name="description" content="Aegis7702 hackathon prototype: explore the difference between no immediate balance change, a modeled loss path, and a state-specific recovery check. Offline fixture walkthrough, not live wallet protection.">
+<title>Aegis7702 — Beyond the signature</title>
+<link rel="stylesheet" href="/aegis-theme.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+ <div class="wrap nav">
+  <a class="brand" href="#main" aria-label="Aegis7702 home"><svg viewBox="0 0 32 38" fill="none" aria-hidden="true"><path d="M16 2 29 7v12c0 8-7 14-13 17C10 33 3 27 3 19V7L16 2Z" stroke="currentColor" stroke-width="1.7"/><path d="m9 19 5 5 10-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Aegis<span>7702</span></a>
+  <nav aria-label="Main navigation"><a href="/" class="nav-dashboard">Dashboard</a><a class="nav-demo" href="#walkthrough">Demo</a><a class="nav-secondary" href="#evidence">Evidence</a><a class="nav-secondary" href="#scope">Scope</a><a class="nav-repo" href="https://github.com/lewbei/aegis7702" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
+ </div>
+</header>
+<main id="main">
+<section class="hero">
+ <div class="wrap hero-grid">
+  <div>
+   <div class="eyebrow">Ethereum capability verification</div>
+   <h1>A signature can<br>move nothing.<br><em>And risk everything.</em></h1>
+   <p class="hero-copy">Look beyond the signing moment. Explore modeled loss paths and state-specific recovery for EIP-7702 and Permit2 authorizations.</p>
+   <div class="actions"><a class="btn btn-primary" href="#walkthrough">Explore the demo <span aria-hidden="true">↗</span></a><a class="btn btn-secondary" href="#evidence">Inspect the evidence</a></div>
+   <div class="hero-footnote">Hackathon prototype · No wallet connection · No real funds</div>
+  </div>
+  <div class="visual" aria-label="Example fixture: signing has zero immediate balance change. Separate loss and recovery branches show different outcomes.">
+   <div class="visual-head"><h2>Same signature. Different futures.</h2><span class="badge">Fixture example</span></div>
+   <div class="mini-node"><div class="node-label"><span><span class="node-icon" aria-hidden="true">↗</span>Off-chain signing</span><span class="mono small">Step 0</span></div><div class="node-value">0.00 <span>immediate balance change</span></div></div>
+   <div class="branch-line">↓ &nbsp; TWO SEPARATE LOCAL-STATE BRANCHES &nbsp; ↓</div>
+   <div class="branch-pair">
+    <div class="branch-box"><div class="b-label">Without recovery</div><strong>10,000</strong><p>test USDC loss in the<br>modeled fixture</p></div>
+    <div class="branch-box good"><div class="b-label">Recovery first</div><strong>0.00</strong><p>test USDC loss on<br>the known-trace check</p></div>
+   </div>
+   <p class="visual-note">Illustration from the bundled demo fixtures. Recovery is evaluated before loss on a separate initial-state branch; it does not refund stolen assets.</p>
+  </div>
+ </div>
+</section>
+<section class="snapshot" aria-label="Published benchmark results">
+ <div class="wrap">
+  <div class="snapshot-head"><span>REPOSITORY-REPORTED BENCHMARK · v1.0.13 RELEASE CONTEXT</span><a href="https://github.com/lewbei/aegis7702/blob/bd15aecd94733efa247ad1d2c7fb846e467e4bfc/README.md" target="_blank" rel="noopener noreferrer">Read results and methodology ↗</a></div>
+  <div class="stats"><div class="stat"><strong>58</strong><p>USENIX-derived cases</p></div><div class="stat"><strong>51 / 58</strong><p>Executable loss witnesses</p></div><div class="stat"><strong>51 / 51</strong><p>Clean-state witness replays</p></div><div class="stat"><strong>51 / 51</strong><p>Known-trace neutralizations</p></div></div>
+ </div>
+</section>
+<section id="walkthrough" class="section">
+ <div class="wrap">
+  <div class="section-head"><div><div class="eyebrow">01 / Guided walkthrough</div><h2>See the difference for yourself.</h2></div><p>Choose a bundled scenario. Follow the signing, loss, and recovery branches without sending a transaction.</p></div>
+  <noscript><p class="noscript">JavaScript is disabled. The first fixture stage is visible below; interactive scenario and stage controls require JavaScript. Evidence and scope links still work.</p></noscript>
+  <div class="demo-shell">
+   <div class="demo-toolbar"><div class="mode">Fixture walkthrough — not live execution</div><div class="mode-note">Local test data · No API calls · No wallet permissions</div></div>
+   <div class="scenario-group" role="group" aria-label="Select a fixture scenario">
+    <button class="scenario-btn" data-scenario="eip7702" aria-pressed="true">EIP-7702 delegation</button><button class="scenario-btn" data-scenario="allowance" aria-pressed="false">Permit2 allowance</button><button class="scenario-btn" data-scenario="signature" aria-pressed="false">Permit2 signature</button>
+   </div>
+   <div class="demo-grid">
+    <div class="demo-story">
+     <div class="demo-caption" id="scenario-caption">EIP-7702 / Account delegation</div>
+     <h3 id="stage-title">Nothing moves when you sign.</h3>
+     <p id="stage-description">The fixture starts with an off-chain authorization and 10,000 test USDC. Signing alone changes no on-chain balance, but the authorization can enable a later loss-producing path.</p>
+     <div class="steps" role="group" aria-label="Walkthrough stages"><button class="step" data-stage="0" aria-current="step"><b>01</b>Signing</button><button class="step" data-stage="1"><b>02</b>Loss branch</button><button class="step" data-stage="2"><b>03</b>Recovery branch</button><button class="step" data-stage="3"><b>04</b>Replay check</button></div>
+     <div class="branch-note" id="branch-note">Initial fixture state. “No immediate balance change” is not a safety guarantee about later use of a signed authorization.</div>
+     <div class="demo-buttons"><button id="previous" class="btn btn-secondary" disabled>← Back</button><button id="next" class="btn btn-primary">View loss branch →</button><button id="reset" class="btn btn-reset" aria-label="Reset walkthrough to first stage">Reset</button></div>
+    </div>
+    <div class="evidence-card" id="evidence-card" data-tone="neutral">
+     <div class="card-top"><span>Fixture observation</span><span id="phase-badge" class="phase-badge">Initial state</span></div>
+     <div id="metric-label" class="metric-label">Immediate balance change</div><div id="metric-number" class="metric-number">0.00</div><div class="metric-unit">TEST USDC · LOCAL FIXTURE, NOT REAL ASSETS</div>
+     <div id="result-title" class="result-title">No execution at the signing moment</div><p id="result-note" class="result-note">The starting tracked balance is 10,000 test USDC. This observation says nothing by itself about future loss.</p>
+     <a class="source-link" href="https://github.com/lewbei/aegis7702/blob/bd15aecd94733efa247ad1d2c7fb846e467e4bfc/app/src/App.tsx" target="_blank" rel="noopener noreferrer">Source: bundled frontend fixtures at bd15aecd9473 ↗</a>
+    </div>
+   </div>
+   <div class="demo-disclaimer">This page displays fixture descriptions and outcomes from the repository. It does not run the verifier, query a chain, validate a signature, or execute recovery.</div>
+  </div>
+  <p id="announcement" class="sr-only" aria-live="polite" aria-atomic="true">EIP-7702 delegation. Stage 1 of 4: Signing.</p>
+ </div>
+</section>
+<section id="evidence" class="section evidence-section">
+ <div class="wrap">
+  <div class="section-head"><div><div class="eyebrow">02 / Inspect the evidence</div><h2>Claims you can trace to a revision.</h2></div><p>These are published repository results, not tests rerun by this website. CI status is a fixed snapshot, not a live badge.</p></div>
+  <div class="evidence-grid">
+   <div class="evidence-box"><h3>Four CI jobs. One revision.</h3><p>GitHub run #36149170988 completed successfully on 25 September 2026 at 14:56 UTC.</p><ul class="checks"><li><span>Foundry Solidity Tests</span><span class="passed">✓ Passed</span></li><li><span>React Frontend Build</span><span class="passed">✓ Passed</span></li><li><span>USENIX 58-Case Executable Benchmark</span><span class="passed">✓ Passed</span></li><li><span>TypeScript Reachability Engine Kill Tests</span><span class="passed">✓ Passed</span></li></ul><a class="inline-link" href="https://github.com/lewbei/aegis7702/actions/runs/36149170988" target="_blank" rel="noopener noreferrer">Inspect the GitHub Actions run ↗</a></div>
+   <div class="evidence-box"><h3>A pinned release, not a moving claim.</h3><p>The release tag, current main revision at review, and CI head resolve to the same commit.</p><dl class="release-dl"><div><dt>Release</dt><dd><a href="https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.13" target="_blank" rel="noopener noreferrer">hackathon-final-v1.0.13</a></dd></div><div><dt>Commit</dt><dd class="mono">bd15aecd94733efa247ad1d2c7fb846e467e4bfc</dd></div><div><dt>Tag object</dt><dd class="mono">8743199a8462cfe1d4c2d9a2f915af5f6c5f9f41</dd></div><div><dt>Review date</dt><dd>26 September 2026</dd></div><div><dt>Review scope</dt><dd>Repository metadata, current source and published CI. Not an independent production security certification.</dd></div></dl><a class="inline-link" href="https://github.com/lewbei/aegis7702/releases/tag/hackathon-final-v1.0.13" target="_blank" rel="noopener noreferrer">Read the release notes ↗</a></div>
+  </div>
+ </div>
+</section>
+<section id="scope" class="scope">
+ <div class="wrap scope-grid">
+  <div><div class="eyebrow">03 / Know the boundary</div><h2>A concrete loss witness.<br>Not a universal safety promise.</h2></div>
+  <div><p><strong>Bounded verification.</strong> The repository describes a supported action space with search depth up to three and a primary tracked ERC-20 token. No modeled loss found does not establish global safety against unsupported actions, deeper paths, or other assets.</p><p><strong>State-specific recovery.</strong> A successful known-trace replay check is about the tested state and trace. It is not a claim that every future path is safe, that funds already lost can be recovered, or that a recovery transaction will win a live ordering race.</p><p><strong>Research prototype.</strong> Broad error classification remains a review caveat. Unknown infrastructure outcomes must not be presented as proof of safety. This page deliberately offers no live wallet-protection service. <a href="https://github.com/lewbei/aegis7702/blob/bd15aecd94733efa247ad1d2c7fb846e467e4bfc/engine/src/search/explorer.ts" target="_blank" rel="noopener noreferrer">Inspect the current classifier ↗</a></p></div>
+ </div>
+</section>
+</main>
+<footer><div class="wrap footer-row"><span>Aegis7702 · Hackathon website & fixture walkthrough</span><span>Prepared for Dr. Lew Kai Liang · Source snapshot: v1.0.13</span></div></footer>
+<script>
+'use strict';
+(() => {
+ const scenarios = {
+  eip7702: {name:'EIP-7702 delegation',caption:'EIP-7702 / Account delegation',intro:'The fixture starts with an off-chain authorization and 10,000 test USDC. Signing alone changes no on-chain balance, but the authorization can enable a later loss-producing path.',loss:'The bundled fixture reports a two-step loss path using the delegated account capability. Its tracked test-token balance falls from 10,000 to zero on this loss branch.',recovery:'For the unconsumed-authorization fixture, the owner advances the account nonce on a separate copy of the initial state. Recovery is evaluated before the authorization is used, not after funds have been lost.',check:'The fixture reports that the old authorization no longer enables the original loss trace after nonce advancement. The tracked balance remains 10,000 test USDC.',method:'Nonce advancement before consumption',detail:'The old authorization no longer matches the recovered account state. Active delegation requires a different recovery strategy; this walkthrough shows the unconsumed case.'},
+  allowance: {name:'Permit2 allowance',caption:'Permit2 / AllowanceTransfer',intro:'The bundled PermitSingle fixture starts with 10,000 test USDC. Releasing an off-chain allowance signature does not immediately transfer tokens, but later use can enable a loss path.',loss:'The bundled fixture reports a two-step allowance-based loss path. The owner’s tracked test-token balance falls from 10,000 to zero on this loss branch.',recovery:'A separate initial-state branch evaluates owner-authorized nonce invalidation before the old permit is consumed. This tests prevention of the recorded loss path; it does not restore an already drained balance.',check:'The fixture reports that the old permit is rejected after nonce invalidation. Rechecking the original loss trace leaves the tracked balance at 10,000 test USDC.',method:'Allowance-permit nonce invalidation',detail:'The recorded check addresses this old permit and tested initial state. It does not establish that every other allowance or capability has been removed.'},
+  signature: {name:'Permit2 signature',caption:'Permit2 / SignatureTransfer',intro:'The bundled SignatureTransfer fixture starts with a one-time signed transfer authorization and 10,000 test USDC. The off-chain signing moment alone has no immediate balance effect.',loss:'The bundled fixture reports a one-step loss path when this transfer capability is consumed. The owner’s tracked test-token balance falls from 10,000 to zero on this loss branch.',recovery:'On a separate copy of the initial state, the owner invalidates the relevant unordered nonce before the transfer authorization is used. No real transaction is sent by this walkthrough.',check:'The fixture reports that the old signature fails its nonce check after invalidation. Rechecking the original loss trace leaves the tracked balance at 10,000 test USDC.',method:'Unordered-nonce invalidation',detail:'The recorded check concerns the one-time authorization in this fixture. It is not a statement about unrelated signatures or assets.'}
+ };
+ const stageNames=['Signing','Loss branch','Recovery branch','Replay check'];
+ const nextLabels=['View loss branch →','View recovery branch →','View replay check →','Restart walkthrough ↺'];
+ const urlParams=new URLSearchParams(window.location.search);
+ let selected=(urlParams.has('scenario')&&Object.hasOwn(scenarios,urlParams.get('scenario')))?urlParams.get('scenario'):'eip7702';
+ let stage=urlParams.has('stage')?Math.min(3,Math.max(0,parseInt(urlParams.get('stage'))||0)):0;
+ const el = id => {
+  const node=document.getElementById(id);
+  if(!node) throw new Error('Missing walkthrough element: '+id);
+  return node;
+ };
+ const set=(id,text)=>{el(id).textContent=text;};
+ function render(){
+  const s=scenarios[selected];
+  const view=[
+   {title:'Nothing moves when you sign.',description:s.intro,branch:'Initial fixture state. “No immediate balance change” is not a safety guarantee about later use of a signed authorization.',badge:'Initial state',metric:'Immediate balance change',value:'0.00',result:'No execution at the signing moment',note:'The starting tracked balance is 10,000 test USDC. This observation says nothing by itself about future loss.',tone:'neutral'},
+   {title:'A later path can produce loss.',description:s.loss,branch:'Loss branch only. This is a displayed outcome from bundled test fixtures, not a new search or live transaction performed by this page.',badge:'Loss branch',metric:'Modeled loss in the fixture',value:'10,000.00',result:'Fixture outcome: tracked balance falls to zero',note:'The fixture’s loss path is a concrete example under its modeled test state. It is not a prediction for a real wallet.',tone:'loss'},
+   {title:'Test recovery on a separate branch.',description:s.recovery,branch:'Important: this branch starts again from the original 10,000 test USDC state, before loss. This is prevention testing, not a refund of the loss branch.',badge:'Recovery branch',metric:'Starting balance on the clean branch',value:'10,000.00',result:s.method,note:s.detail,tone:'neutral'},
+   {title:'Check the known trace again.',description:s.check,branch:'Known-trace check, recovered branch. A zero-loss result for this trace and state is not a guarantee against other paths, assets, or live transaction-ordering risks.',badge:'Recorded check',metric:'Loss on the recorded post-recovery check',value:'0.00',result:'Fixture outcome: 10,000 test USDC preserved',note:'The original loss trace is neutralized in the fixture’s recovery branch. This page displays that result; it has not independently executed it.',tone:'neutral'}
+  ][stage];
+  set('scenario-caption',s.caption);set('stage-title',view.title);set('stage-description',view.description);set('branch-note',view.branch);set('phase-badge',view.badge);set('metric-label',view.metric);set('metric-number',view.value);set('result-title',view.result);set('result-note',view.note);
+  el('evidence-card').dataset.tone=view.tone;
+  document.querySelectorAll('[data-scenario]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scenario===selected)));
+  document.querySelectorAll('[data-stage]').forEach(b=>{const n=Number(b.dataset.stage);if(n===stage)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');b.classList.toggle('past',n<stage);});
+  el('previous').disabled=stage===0;set('next',nextLabels[stage]);
+  set('announcement',s.name+'. Stage '+(stage+1)+' of 4: '+stageNames[stage]+'. '+view.title+' '+view.result+'. This is a fixture walkthrough, not live execution.');
+ }
+ document.querySelectorAll('[data-scenario]').forEach(b=>b.addEventListener('click',()=>{if(!Object.hasOwn(scenarios,b.dataset.scenario))return;selected=b.dataset.scenario;stage=0;render();}));
+ document.querySelectorAll('[data-stage]').forEach(b=>b.addEventListener('click',()=>{const n=Number(b.dataset.stage);if(Number.isInteger(n)&&n>=0&&n<4){stage=n;render();}}));
+ el('previous').addEventListener('click',()=>{stage=Math.max(0,stage-1);render();});
+ el('next').addEventListener('click',()=>{stage=(stage+1)%4;render();});
+ el('reset').addEventListener('click',()=>{stage=0;render();});
+ render();
+})();
+</script>
+</body>
+</html>

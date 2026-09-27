@@ -1,893 +1,277 @@
-import { useState, useEffect } from 'react';
-import {
-  ShieldAlert,
-  ShieldCheck,
-  Zap,
-  RefreshCw,
-  Cpu,
-  Layers,
-  CheckCircle2,
-  AlertTriangle,
-  Lock,
-  Key,
-  BookOpen
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { CI_RUN, REPO, RELEASE, SCENARIOS, SOURCE, SOURCE_COMMIT } from './data/scenarios';
+import type { Scenario } from './data/scenarios';
+import { isRecord, requestJson, text, validateAnalysis, validateRecovery, validateReplay } from './api';
+import type { JsonRecord } from './api';
 
-interface Scenario {
-  id: string;
-  name: string;
-  protocol: string;
-  category: string;
-  description: string;
-  victimAddress: string;
-  attackerAddress: string;
-  tokenSymbol: string;
-  tokenAmount: string;
-  initialBalance: string;
-  capabilityDetails: {
-    label: string;
-    fields: { [key: string]: string };
-  };
-  baselineVerdict: {
-    status: 'FALSE_SAFE';
-    balanceDelta: string;
-    reason: string;
-  };
-  counterexample: {
-    depth: number;
-    reachableLoss: string;
-    trace: {
-      step: number;
-      actionId: string;
-      description: string;
-      target: string;
-      calldataPreview: string;
-      actor: string;
-      balanceAfter: string;
-    }[];
-  };
-  recovery: {
-    strategy: string;
-    functionCall: string;
-    description: string;
-    target: string;
-    calldata: string;
-    replayResult: {
-      status: 'REVERTED';
-      preservedBalance: string;
-      errorSignature: string;
-    };
-  };
-}
-
-const SCENARIOS: Scenario[] = [
-  {
-    id: 'eip7702_prague',
-    name: 'EIP-7702 Prague Hardfork Takeover',
-    protocol: 'EIP-7702 (Ethereum Prague)',
-    category: 'Account Abstraction & Delegation',
-    description:
-      'Victim signs off-chain EIP-7702 authorization tuple delegating EOA execution context to MaliciousDelegate. Immediate balance delta is $0.00, but attacker subsequently includes the authorization in an EIP-7702 Type-0x04 transaction and invokes sweep().',
-    victimAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    attackerAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-    tokenSymbol: 'USDC',
-    tokenAmount: '10,000.00',
-    initialBalance: '10,000.00 USDC',
-    capabilityDetails: {
-      label: 'Signed EIP-7702 Authorization Tuple',
-      fields: {
-        'Delegate Address': '0x8464135c8f25da09e49bc8782676a84730c318bc (MaliciousDelegate)',
-        'Authority (Victim)': '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-        'Signed Nonce': '2',
-        'Chain ID': '31337 (Prague Hardfork)',
-        'Signature r': '0x754348be09f7d9930790b71fbc04c25c29114c0ff52f4e68b1ad0a5d1922c970',
-        'Signature s': '0x661521dd2ab7e592c001ad223156dbe4b1ce85a6027bface138ae9688ccd3627',
-        'yParity': '1'
-      }
-    },
-    baselineVerdict: {
-      status: 'FALSE_SAFE',
-      balanceDelta: '0.00 USDC (Δ = $0)',
-      reason:
-        'Immediate-delta baseline simulation inspects only immediate balance delta at signing. Because signing does not execute bytecode on-chain, the baseline returns "SAFE (0.00 USDC delta)".'
-    },
-    counterexample: {
-      depth: 2,
-      reachableLoss: '10,000.00 USDC',
-      trace: [
-        {
-          step: 1,
-          actionId: 'EIP7702.relayAuthorization',
-          description: 'Attacker broadcasts Type-0x04 transaction attaching authorization list to install 0xef0100 delegation bytecode on victim EOA',
-          target: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-          calldataPreview: '0x (Type-0x04 Auth List [delegate=0x8464...])',
-          actor: 'Attacker (0x7099...79C8)',
-          balanceAfter: '10,000.00 USDC (Installed code: 0xef01008464...)'
-        },
-        {
-          step: 2,
-          actionId: 'MaliciousDelegate.sweep',
-          description: 'Attacker invokes sweep(USDC, attacker) on victim EOA context. The EOA executes delegate bytecode, transferring all balance.',
-          target: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-          calldataPreview: '0x1563f4580000000000000000000000005fbdb2315678afecb367f032d93f642f64180aa3...',
-          actor: 'Attacker (0x7099...79C8)',
-          balanceAfter: '0.00 USDC (Full Balance Exploited)'
-        }
-      ]
-    },
-    recovery: {
-      strategy: 'ADVANCE_NONCE (Unconsumed) / CLEAR_DELEGATION (Active)',
-      functionCall: 'selfTx.send({ value: 0 }) -> nonce 2 -> 3',
-      description:
-        'Owner increments on-chain account nonce from 2 to 3 via self-transaction. Under EIP-7702 rules (authority.nonce == auth.nonce), the stolen authorization tuple is invalidated by nonce mismatch (provided recovery is mined before attacker consumption).',
-      target: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-      calldata: '0x',
-      replayResult: {
-        status: 'REVERTED',
-        preservedBalance: '10,000.00 USDC (Tracked Balance Unchanged)',
-        errorSignature: 'EIP-7702 Authorization Nonce Mismatch (Code remains 0x, sweep fails)'
-      }
-    }
-  },
-  {
-    id: 'permit2_allowance',
-    name: 'Permit2 AllowanceTransfer Delayed Drain',
-    protocol: 'Uniswap Permit2',
-    category: 'DeFi Allowance Delegation',
-    description:
-      'Victim signs off-chain PermitSingle granting 10,000 USDC allowance to an attacker spender. 1-step simulation shows $0 loss because no state changes occur until permit() and transferFrom() are submitted.',
-    victimAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    attackerAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-    tokenSymbol: 'USDC',
-    tokenAmount: '10,000.00',
-    initialBalance: '10,000.00 USDC',
-    capabilityDetails: {
-      label: 'Signed PermitSingle EIP-712 Message',
-      fields: {
-        'Permit2 Contract': '0x000000000022D473030F116dDEE9F6B43aC78BA3 (Canonical)',
-        'Owner': '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-        'Spender': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (Attacker)',
-        'Token': '0xe7f1725e7734ce288f8367e1bb143e90bb3f0512 (USDC)',
-        'Approved Amount': '10,000.00 USDC',
-        'Nonce': '0',
-        'SigDeadline': '1893456000 (Dec 2029)'
-      }
-    },
-    baselineVerdict: {
-      status: 'FALSE_SAFE',
-      balanceDelta: '0.00 USDC (Δ = $0)',
-      reason:
-        'Immediate-delta baseline simulation returns zero balance change. It fails to model the future multi-step capability enabled by Permit2.'
-    },
-    counterexample: {
-      depth: 2,
-      reachableLoss: '10,000.00 USDC',
-      trace: [
-        {
-          step: 1,
-          actionId: 'Permit2.permit',
-          description: 'Attacker broadcasts PermitSingle payload to Permit2 contract, activating 10,000 USDC allowance for spender',
-          target: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-          calldataPreview: '0x2b67b1b0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266...',
-          actor: 'Attacker (0x7099...79C8)',
-          balanceAfter: '10,000.00 USDC (Allowance: 10,000.00)'
-        },
-        {
-          step: 2,
-          actionId: 'Permit2.transferFrom',
-          description: 'Attacker calls transferFrom(victim, attacker, 10000 USDC) on Permit2, sweeping all tokens',
-          target: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-          calldataPreview: '0x36c78516000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266...',
-          actor: 'Attacker (0x7099...79C8)',
-          balanceAfter: '0.00 USDC (Full Balance Exploited)'
-        }
-      ]
-    },
-    recovery: {
-      strategy: 'INVALIDATE_NONCE',
-      functionCall: 'Permit2.invalidateNonces(token, spender, newNonce: 1)',
-      description:
-        'Victim broadcasts invalidateNonces on canonical Permit2 to advance the nonce mapping for (token, spender). Any subsequent permit() call with nonce 0 will revert.',
-      target: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-      calldata: '0x7e0294eb000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512...',
-      replayResult: {
-        status: 'REVERTED',
-        preservedBalance: '10,000.00 USDC (Tracked Balance Unchanged)',
-        errorSignature: 'Permit2: InvalidNonce() -> Revert at Step 1'
-      }
-    }
-  },
-  {
-    id: 'permit2_signature',
-    name: 'Permit2 SignatureTransfer Bitmap Exploit',
-    protocol: 'Uniswap Permit2',
-    category: 'DeFi One-Time Transfer Nonces',
-    description:
-      'Victim signs off-chain PermitTransferFrom with unordered nonce 1025. Attacker can submit permitTransferFrom directly to transfer tokens without prior approval.',
-    victimAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    attackerAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-    tokenSymbol: 'USDC',
-    tokenAmount: '10,000.00',
-    initialBalance: '10,000.00 USDC',
-    capabilityDetails: {
-      label: 'Signed PermitTransferFrom EIP-712 Message',
-      fields: {
-        'Permit2 Contract': '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-        'Owner': '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-        'Spender': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (Attacker)',
-        'Unordered Nonce': '1025 (wordPos = 4, bitPos = 1)',
-        'Requested Amount': '10,000.00 USDC',
-        'Permitted Token': '0xe7f1725e7734ce288f8367e1bb143e90bb3f0512 (USDC)'
-      }
-    },
-    baselineVerdict: {
-      status: 'FALSE_SAFE',
-      balanceDelta: '0.00 USDC (Δ = $0)',
-      reason:
-        'Signature transfer signatures do not execute until mined. Immediate-delta baseline simulation sees zero deduction.'
-    },
-    counterexample: {
-      depth: 1,
-      reachableLoss: '10,000.00 USDC',
-      trace: [
-        {
-          step: 1,
-          actionId: 'Permit2.permitTransferFrom',
-          description: 'Attacker directly calls permitTransferFrom with signed bitmap nonce 1025 to drain 10,000 USDC to attacker address',
-          target: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-          calldataPreview: '0x30f28b7a000000000000000000000000...',
-          actor: 'Attacker (0x7099...79C8)',
-          balanceAfter: '0.00 USDC (Full Balance Exploited)'
-        }
-      ]
-    },
-    recovery: {
-      strategy: 'INVALIDATE_UNORDERED_NONCE',
-      functionCall: 'Permit2.invalidateUnorderedNonces(wordPos: 4, mask: 2)',
-      description:
-        'Victim calls invalidateUnorderedNonces(4, 2) on Permit2, setting bit 1 of word 4 in the bitmap. Nonce 1025 is invalidated by bitmap assignment.',
-      target: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-      calldata: '0xa0d4737200000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000002',
-      replayResult: {
-        status: 'REVERTED',
-        preservedBalance: '10,000.00 USDC (Tracked Balance Unchanged)',
-        errorSignature: 'Permit2: InvalidNonce() (receipt.status: reverted)'
-      }
-    }
-  }
+type Mode = 'fixture' | 'live';
+type Tab = 'verifier' | 'architecture' | 'benchmark';
+type Health = 'checking' | 'available' | 'unavailable';
+type Busy = 'analysis' | 'recovery' | null;
+interface RunResult { source: Mode; data: JsonRecord }
+const STAGES = ['Signing', 'Loss branch', 'Recovery branch', 'Replay check'];
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'verifier', label: 'Verification playground' },
+  { id: 'architecture', label: 'Mathematical model' },
+  { id: 'benchmark', label: 'Evidence & citations' },
 ];
 
-export function App() {
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('eip7702_prague');
-  const [activeTab, setActiveTab] = useState<'verifier' | 'architecture' | 'benchmark'>('verifier');
-  const [isVerifying, setIsVerifying] = useState<boolean>(false);
-  const [verificationDone, setVerificationDone] = useState<boolean>(false);
-  const [isRecovering, setIsRecovering] = useState<boolean>(false);
-  const [recoveryDone, setRecoveryDone] = useState<boolean>(false);
-
-  // Live Engine integration state
-  const [engineStatus, setEngineStatus] = useState<'checking' | 'connected' | 'fallback'>('checking');
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [realRecoveryTx, setRealRecoveryTx] = useState<{ txHash: string; gasUsed: string } | null>(null);
-  const [realReplayResult, setRealReplayResult] = useState<any | null>(null);
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => {
-        if (res.ok) setEngineStatus('connected');
-        else setEngineStatus('fallback');
-      })
-      .catch(() => setEngineStatus('fallback'));
-  }, []);
-
-  const scenario = SCENARIOS.find((s) => s.id === selectedScenarioId) || SCENARIOS[0];
-
-  const handleSelectScenario = (id: string) => {
-    setSelectedScenarioId(id);
-    setVerificationDone(false);
-    setRecoveryDone(false);
-    setActiveRunId(null);
-    setRealRecoveryTx(null);
-    setRealReplayResult(null);
-  };
-
-  const handleRunVerification = async () => {
-    setIsVerifying(true);
-    setRecoveryDone(false);
-    setRealRecoveryTx(null);
-    setRealReplayResult(null);
-
-    try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenarioId: selectedScenarioId })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setActiveRunId(data.runId);
-        setEngineStatus('connected');
-        setIsVerifying(false);
-        setVerificationDone(true);
-        return;
-      }
-    } catch {
-      // Backend offline, fallback to deterministic verification fixture
-    }
-
-    setTimeout(() => {
-      setIsVerifying(false);
-      setVerificationDone(true);
-      setEngineStatus('fallback');
-    }, 1000);
-  };
-
-  const handleExecuteRecovery = async () => {
-    setIsRecovering(true);
-
-    if (activeRunId) {
-      try {
-        const recRes = await fetch('/api/recover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runId: activeRunId })
-        });
-        const recData = await recRes.json();
-        if (!recRes.ok || recData.status === "STATE_PRECONDITION_FAILED" || recData.status === "RECOVERY_PARTIAL_FAILURE") {
-          setIsRecovering(false);
-          setRecoveryDone(true);
-          setRealReplayResult({
-            mitigated: false,
-            message: `Recovery aborted (HTTP ${recRes.status}): ${recData.reason || recData.message || "State precondition conflict"}`
-          });
-          return;
-        }
-        setRealRecoveryTx({ txHash: recData.txHash, gasUsed: recData.gasUsed });
-
-        const repRes = await fetch('/api/replay', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runId: activeRunId })
-        });
-        const repData = await repRes.json();
-        setRealReplayResult(repData);
-        setIsRecovering(false);
-        setRecoveryDone(true);
-        return;
-      } catch (err: any) {
-        setIsRecovering(false);
-        setRecoveryDone(true);
-        setRealReplayResult({
-          mitigated: false,
-          message: `Network error executing recovery: ${err.message || err}`
-        });
-        return;
-      }
-    }
-
-    setTimeout(() => {
-      setIsRecovering(false);
-      setRecoveryDone(true);
-    }, 1000);
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-400">
-              <ShieldAlert className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-white">AEGIS7702</h1>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  Prague & Permit2 Ready
-                </span>
-                {engineStatus === 'connected' ? (
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Live Anvil Engine Online (Port 3001)
-                  </span>
-                ) : (
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1" title="Start engine server with 'cd engine && npm run server' for live on-chain execution">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
-                    Client Fixture Mode
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400">
-                Executable Capability-Reachability Verifier & State-Specific Recovery Synthesizer
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <nav className="flex bg-slate-800/80 p-1 rounded-lg border border-slate-700/60 text-xs font-medium">
-              <button
-                onClick={() => setActiveTab('verifier')}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  activeTab === 'verifier'
-                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-sm'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Verification Playground
-              </button>
-              <button
-                onClick={() => setActiveTab('architecture')}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  activeTab === 'architecture'
-                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-sm'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Mathematical Model
-              </button>
-              <button
-                onClick={() => setActiveTab('benchmark')}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  activeTab === 'benchmark'
-                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-sm'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Academic Evidence & Citations
-              </button>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-        {/* Core Formula Banner */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs uppercase tracking-wider text-slate-400 font-semibold">
-                The Foundational Flaw of 1-Step Scanners
-              </div>
-              <div className="font-mono text-sm sm:text-base text-rose-300 font-semibold mt-0.5">
-                SimulateCurrentExecution(c, s₀) ⇏ SafeFutureCapability(c, s₀)
-              </div>
-            </div>
-          </div>
-          <div className="text-right text-xs text-slate-400 max-w-md hidden md:block">
-            Signed off-chain authorizations (EIP-7702 & Permit2) produce a <strong>$0.00 delta</strong> upon signing, creating false security while exposing victim accounts to reachable multi-step drain paths.
-          </div>
-        </div>
-
-        {activeTab === 'verifier' && (
-          <div className="space-y-6">
-            {/* Scenario Selector */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {SCENARIOS.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => handleSelectScenario(s.id)}
-                  className={`text-left p-4 rounded-xl border transition-all ${
-                    selectedScenarioId === s.id
-                      ? 'bg-cyan-950/30 border-cyan-500/50 shadow-lg shadow-cyan-950/50 ring-1 ring-cyan-500/30'
-                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                      {s.protocol}
-                    </span>
-                    {selectedScenarioId === s.id && (
-                      <span className="flex h-2 w-2 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-semibold text-white text-sm">{s.name}</h3>
-                  <p className="text-xs text-slate-400 mt-1 line-clamp-2">{s.description}</p>
-                </button>
-              ))}
-            </div>
-
-            {/* Split Screen: Capability Inspection vs 1-Step Baseline */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Capability Card */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <div className="flex items-center gap-2 text-cyan-400 font-semibold text-sm">
-                    <Key className="w-4 h-4" />
-                    <span>{scenario.capabilityDetails.label}</span>
-                  </div>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                    Depth 0 (Pre-Execution)
-                  </span>
-                </div>
-
-                <div className="space-y-2 text-xs font-mono">
-                  {Object.entries(scenario.capabilityDetails.fields).map(([k, v]) => (
-                    <div key={k} className="flex flex-col sm:flex-row sm:justify-between py-1 border-b border-slate-800/50">
-                      <span className="text-slate-400">{k}:</span>
-                      <span className="text-slate-200 truncate max-w-xs">{v}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-xs text-slate-300 space-y-1">
-                  <div className="flex items-center justify-between font-medium">
-                    <span className="text-slate-400">Victim Account Balance:</span>
-                    <span className="text-emerald-400 font-mono font-semibold">{scenario.initialBalance}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">On-Chain State:</span>
-                    <span className="text-slate-200">Untouched (No transaction mined yet)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Quo 1-Step Baseline */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div className="flex items-center gap-2 text-rose-400 font-semibold text-sm">
-                      <ShieldAlert className="w-4 h-4" />
-                      <span>Immediate-Delta Baseline (1-Step Simulation)</span>
-                    </div>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Baseline Verdict: SAFE ✅
-                    </span>
-                  </div>
-
-                  <div className="mt-4 p-4 bg-rose-950/20 border border-rose-900/40 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-300">Immediate Balance Delta (Δ):</span>
-                      <span className="text-sm font-mono font-bold text-emerald-400">{scenario.baselineVerdict.balanceDelta}</span>
-                    </div>
-                    <div className="text-xs text-slate-300 leading-relaxed">
-                      {scenario.baselineVerdict.reason}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
-                  <div className="text-xs text-slate-400">
-                    Run reachability search on forked Anvil EVM:
-                  </div>
-                  <button
-                    onClick={handleRunVerification}
-                    disabled={isVerifying}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs shadow-lg shadow-cyan-500/20 transition-all disabled:opacity-50"
-                  >
-                    {isVerifying ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Exploring State Graph (k ≤ 3)...
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4" />
-                        Run Aegis7702 Verifier
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Reachability Verification Results */}
-            {verificationDone && (
-              <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 space-y-6 shadow-2xl shadow-cyan-950/40 animate-in fade-in duration-300">
-                {(!activeRunId || engineStatus === 'fallback') && (
-                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <span className="font-semibold flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                      PRECOMPUTED VERIFIED FIXTURE (No live Anvil execution performed in this run)
-                    </span>
-                    <span className="text-[11px] text-amber-400/80 font-mono">
-                      Run 'npm run server' in /engine to enable live on-chain execution
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-3 w-3 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
-                      </span>
-                      <h2 className="text-lg font-bold text-white tracking-tight">
-                        Counterexample Discovered: Reachable Multi-Step Loss
-                      </h2>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Bounded Depth-First Search (DFS) explored legal action space and proved asset drainage on forked EVM.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <div className="text-xs text-slate-400">Reachable Asset Loss</div>
-                      <div className="text-lg font-mono font-bold text-rose-400">
-                        -{scenario.counterexample.reachableLoss}
-                      </div>
-                    </div>
-                    <div className="h-8 w-px bg-slate-800"></div>
-                    <div className="text-right">
-                      <div className="text-xs text-slate-400">Exploit Depth</div>
-                      <div className="text-lg font-mono font-bold text-cyan-400">
-                        {scenario.counterexample.depth} Step(s)
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Graph Trace Flow */}
-                <div className="space-y-4">
-                  <h3 className="text-xs uppercase tracking-wider font-semibold text-slate-400 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-cyan-400" />
-                    Executable Multi-Step Exploit Trace (Anvil Fork Proven)
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {scenario.counterexample.trace.map((step) => (
-                      <div
-                        key={step.step}
-                        className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 relative overflow-hidden"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                            Step {step.step}: {step.actionId}
-                          </span>
-                          <span className="text-xs font-mono text-slate-400">
-                            Actor: {step.actor.slice(0, 10)}...
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-slate-300 leading-relaxed">
-                          {step.description}
-                        </p>
-
-                        <div className="space-y-1 font-mono text-[11px] bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
-                          <div className="text-slate-400 truncate">
-                            Target: <span className="text-slate-200">{step.target}</span>
-                          </div>
-                          <div className="text-slate-400 truncate">
-                            Calldata: <span className="text-cyan-300">{step.calldataPreview}</span>
-                          </div>
-                          <div className="text-slate-400">
-                            Balance After: <span className="text-rose-400 font-semibold">{step.balanceAfter}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Synthesized Recovery Action */}
-                <div className="bg-gradient-to-r from-cyan-950/40 via-slate-900 to-slate-950 border border-cyan-500/40 rounded-xl p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs uppercase tracking-wider text-cyan-400 font-semibold flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5" />
-                        Aegis7702 State-Specific Recovery Synthesizer
-                      </div>
-                      <div className="font-semibold text-white text-sm mt-0.5">
-                        Strategy: {scenario.recovery.strategy}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={handleExecuteRecovery}
-                      disabled={isRecovering}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs shadow-lg transition-all disabled:opacity-50 ${
-                        activeRunId
-                          ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20"
-                          : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
-                      }`}
-                    >
-                      {isRecovering ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          {activeRunId ? "Executing On-Fork Mitigation..." : "Loading Precomputed Trace..."}
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-4 h-4" />
-                          {activeRunId ? "Execute Recovery & Verify Replay" : "View Precomputed Mitigation Trace"}
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-                    <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800/80">
-                      <div className="text-slate-400">Generated Action:</div>
-                      <div className="text-cyan-300 font-semibold mt-1">{scenario.recovery.functionCall}</div>
-                      <div className="text-slate-300 text-[11px] font-sans mt-2">{scenario.recovery.description}</div>
-                    </div>
-
-                    <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800/80">
-                      <div className="text-slate-400">Target Address:</div>
-                      <div className="text-slate-200 mt-1 truncate">{scenario.recovery.target}</div>
-                      <div className="text-slate-400 mt-2">Calldata:</div>
-                      <div className="text-slate-400 text-[11px] truncate mt-0.5">{scenario.recovery.calldata}</div>
-                    </div>
-                  </div>
-
-                  {recoveryDone && (
-                    realReplayResult && !realReplayResult.mitigated ? (
-                      <div className="mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 bg-rose-950/30 border border-rose-500/40">
-                        <div className="flex items-center gap-2 font-semibold text-sm text-rose-400">
-                          <AlertTriangle className="w-5 h-5 text-rose-400" />
-                          <span>Recovery Aborted / Precondition Violation</span>
-                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 ml-auto font-mono">
-                            Safety Defense Triggered
-                          </span>
-                        </div>
-                        <div className="text-xs text-rose-200 font-mono">
-                          {realReplayResult.message || "State precondition conflict: on-chain state diverged."}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`mt-4 p-4 rounded-xl space-y-2 animate-in fade-in duration-300 ${
-                        activeRunId && realRecoveryTx
-                          ? "bg-emerald-950/30 border border-emerald-500/40"
-                          : "bg-slate-950/60 border border-slate-700/60"
-                      }`}>
-                        <div className="flex items-center gap-2 font-semibold text-sm">
-                          {activeRunId && realRecoveryTx ? (
-                            <>
-                              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                              <span className="text-emerald-400">Mitigation Verified: Exploit Neutralized (Zero Tracked Loss)!</span>
-                              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ml-auto font-mono">
-                                Live Anvil Confirmed
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="w-5 h-5 text-cyan-400" />
-                              <span className="text-slate-200">Precomputed Verification: Exploit Neutralized (Zero Tracked Loss)</span>
-                              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-auto font-mono">
-                                Recorded Fixture
-                              </span>
-                            </>
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-300 font-mono space-y-1">
-                          {realRecoveryTx ? (
-                            <div className="text-cyan-300 truncate">
-                              Recovery Tx Hash: <span className="font-bold">{realRecoveryTx.txHash}</span> (Gas Used: {realRecoveryTx.gasUsed})
-                            </div>
-                          ) : (
-                            <div className="text-slate-400 italic">
-                              Recorded recovery transaction calldata verified against local Anvil fork
-                            </div>
-                          )}
-                          <div>
-                            Attacker Replay Status:{" "}
-                            <span className="text-rose-400 font-bold">
-                              REVERTED ({realReplayResult?.revertError || scenario.recovery.replayResult.errorSignature})
-                            </span>
-                          </div>
-                          <div>
-                            Victim Tracked Balance:{" "}
-                            <span className="text-emerald-400 font-bold">
-                              {realReplayResult?.finalVictimBalance || scenario.recovery.replayResult.preservedBalance}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'architecture' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-cyan-400" />
-              Aegis7702 Mathematical Architecture & Formal Semantics
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-300 leading-relaxed">
-              <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h3 className="font-semibold text-cyan-400 text-sm">1. Capability-Reachability vs Immediate-Delta Baseline</h3>
-                <p>
-                  Conventional execution simulation answers what a proposed execution does under a particular current state. Detached authorization capabilities introduce a fundamentally different question: what future attacker-controlled state transitions become reachable after the signed capability is released?
-                </p>
-                <div className="font-mono bg-slate-900 p-2 rounded border border-slate-800 text-cyan-300">
-                  SimulateCurrentExecution(c, s₀) ⇏ SafeFutureCapability(c, s₀)
-                </div>
-                <p>
-                  <strong>Dangerous False Negatives:</strong> An authorization may cause zero immediate state change at signing (Δ = $0.00) while enabling a later loss-producing execution path.
-                </p>
-              </div>
-
-              <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h3 className="font-semibold text-cyan-400 text-sm">2. Bounded Reachability Engine (k ≤ 3) & Verification Asymmetry</h3>
-                <p>
-                  Aegis7702 explores legal candidate transitions within supported action semantics 𝒜_modeled(c, s):
-                </p>
-                <div className="font-mono bg-slate-900 p-2 rounded border border-slate-800 text-rose-300">
-                  Found loss path ⟹ Concrete vulnerability witness π, L(s₀, T_π(s₀)) &gt; 0
-                </div>
-                <p>
-                  Crucially, when no loss path is found within depth k ≤ 3, the verifier establishes only <code className="text-cyan-300">{"¬Unsafe_{≤ k}^{𝒜_modeled}(c, s₀)"}</code> (no modeled loss path found within bounded search), not global safety.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-              <h3 className="font-semibold text-cyan-400 text-sm">3. Stopping Criterion & Executable Verification</h3>
-              <p className="text-xs text-slate-300">
-                The verification pipeline follows an executable stopping criterion on live EVM state snapshots:
-              </p>
-              <div className="font-mono text-xs bg-slate-900 p-3 rounded border border-slate-800 text-cyan-300 text-center">
-                SignedCapability ⟶ Bounded DFS ⟶ Discovered Loss Witness π ⟶ Synthesized Recovery s_R ⟶ L(s_R, T_π(s_R)) = 0
-              </div>
-              <p className="text-xs text-slate-400">
-                Aegis7702 replays the identical counterexample against the post-recovery fork state and verifies that the previously successful exploit trace is neutralized ($L=0$, via on-chain revert or clean-state no-op), keeping tracked balances unchanged. Note the race condition: recovery is subject to mining order and must be mined before attacker consumption.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'benchmark' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-cyan-400" />
-              Academic Gap Research & Empirical Evidence
-            </h2>
-
-            <div className="space-y-4 text-xs text-slate-300">
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white text-sm">USENIX Security 2026: EIP-7702 Empirical Analysis (Huang et al.)</span>
-                  <span className="text-rose-400 font-bold font-mono">63%+ Malicious Rate</span>
-                </div>
-                <p className="text-slate-400">
-                  USENIX Security 2026 reports that, across its seven-chain dataset, over <strong>63% of observed EIP-7702 authorization transactions</strong> were associated with malicious EOA-targeted attacks (identifying 924 malicious contract accounts, &gt;$2.3M realized losses, and &gt;$10M exposed).
-                </p>
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white text-sm">M. Hauser (2026): Key Sovereignty & Account Encumbrance</span>
-                  <span className="text-cyan-400 font-mono">arXiv:2605.01210</span>
-                </div>
-                <p className="text-slate-400">
-                  Establishes structural limits concerning Non-Custodial Enforced Encumbrance in account-based ledgers, illustrating how account-based authorization ultimately remains subordinate to the controlling key under the paper's Key Sovereignty model.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white text-sm">Uniswap Permit2 Universal Drain Vectors</span>
-                  <span className="text-amber-400 font-mono">Blockaid Security Report</span>
-                </div>
-                <p className="text-slate-400">
-                  Documents how phishing drainers harvest off-chain PermitSingle / PermitTransferFrom signatures without triggering wallet alerts, delaying execution until high-value victim balances are accumulated.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800 bg-slate-900/60 py-4 px-6 text-center text-xs text-slate-500">
-        Aegis7702 • Built for 3rd-Web-Hack Hackathon (TechZap Club) • Tested with Foundry, Anvil (Prague Hardfork), Viem & Solmate
-      </footer>
+function Shield() {
+  return <svg viewBox="0 0 32 38" fill="none" aria-hidden="true"><path d="M16 2 29 7v12c0 8-7 14-13 17C10 33 3 27 3 19V7L16 2Z" stroke="currentColor" strokeWidth="1.7" /><path d="m9 19 5 5 10-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+function External({ href, children }: { href: string; children: React.ReactNode }) {
+  return <a href={href} target="_blank" rel="noopener noreferrer">{children}<span aria-hidden="true"> ↗</span></a>;
+}
+function RawDetails({ title, data }: { title: string; data: JsonRecord }) {
+  return <details className="raw-details"><summary>{title}</summary><pre>{JSON.stringify(data, null, 2)}</pre></details>;
+}
+function Hero() {
+  return <section className="hero"><div className="wrap hero-grid">
+    <div><div className="eyebrow">Ethereum capability verification / Interactive dashboard</div>
+      <h1>A signature can<br />move nothing.<br /><em>And risk everything.</em></h1>
+      <p className="hero-copy">Inspect the capability. Follow the modeled loss path. Check recovery on a separate state branch — with bundled fixtures or your existing local engine.</p>
+      <div className="actions"><a className="btn btn-primary" href="#workspace">Open the dashboard <span aria-hidden="true">↗</span></a><a className="btn btn-secondary" href="/judge-demo.html">Judge walkthrough</a></div>
+      <div className="hero-footnote">Hackathon prototype · No wallet connection · Local test scenarios</div>
     </div>
-  );
+    <div className="visual" aria-label="Fixture illustration: loss and recovery start on separate branches, before funds are lost.">
+      <div className="visual-head"><h2>Same signature. Different futures.</h2><span className="badge">Fixture example</span></div>
+      <div className="mini-node"><div className="node-label"><span><span className="node-icon" aria-hidden="true">↗</span>Off-chain signing</span><span className="mono small">Step 0</span></div><div className="node-value">0.00 <span>immediate balance change</span></div></div>
+      <div className="branch-line">↓ &nbsp; TWO SEPARATE LOCAL-STATE BRANCHES &nbsp; ↓</div>
+      <div className="branch-pair"><div className="branch-box"><div className="b-label">Without recovery</div><strong>10,000</strong><p>test USDC loss in the<br />modeled fixture</p></div><div className="branch-box good"><div className="b-label">Recovery first</div><strong>0.00</strong><p>test USDC loss on<br />the known-trace check</p></div></div>
+      <p className="visual-note">Illustration from bundled fixtures, not the current run. Recovery is evaluated before loss on a separate initial-state branch; it does not refund stolen assets.</p>
+    </div>
+  </div></section>;
+}
+function Snapshot() {
+  return <section className="snapshot" aria-label="Published benchmark results"><div className="wrap">
+    <div className="snapshot-head"><span>REPOSITORY-REPORTED BENCHMARK · v1.0.13 RELEASE CONTEXT</span><External href={`${SOURCE}/testdata/AEGIS_USENIX_EVALUATION.md`}>Read results and methodology</External></div>
+    <div className="stats">{[
+      ['58', 'USENIX-derived cases'], ['51 / 58', 'Executable loss witnesses'],
+      ['51 / 51', 'Clean-state witness replays'], ['51 / 51', 'Known-trace neutralizations'],
+    ].map(([value, label]) => <div className="stat" key={label}><strong>{value}</strong><p>{label}</p></div>)}</div>
+  </div></section>;
+}
+function Scope() {
+  return <section id="scope" className="scope"><div className="wrap scope-grid">
+    <div><div className="eyebrow">03 / Know the boundary</div><h2>A concrete loss witness.<br />Not a universal safety promise.</h2></div>
+    <div><p><strong>Bounded verification.</strong> The repository describes supported actions, a search depth up to three, and a primary tracked ERC-20 token. No modeled loss found does not establish global safety.</p>
+    <p><strong>State-specific recovery.</strong> A known-trace replay check concerns the tested state and trace. It does not refund assets already lost, cover every future path, or guarantee live transaction ordering.</p>
+    <p><strong>Separate evidence sources.</strong> Fixture values are bundled examples. Local-engine results are displayed only from the returned API evidence. Unknown, incomplete, or failed responses are not replaced with successful fixture outcomes. <External href={`${SOURCE}/engine/src/search/explorer.ts`}>Inspect engine scope and limitations</External></p></div>
+  </div></section>;
+}
+function Evidence() {
+  return <div className="view-content">
+    <div className="view-heading"><div className="eyebrow">Source-backed, not a moving claim</div><h3>Evidence you can inspect.</h3><p>These are published repository results for the pinned release, not measurements performed by this dashboard session.</p></div>
+    <div className="evidence-grid">
+      <article className="evidence-box"><h3>Four published CI jobs.</h3><p>GitHub Actions run {CI_RUN} was reported successful for the source commit. The new frontend changes are not covered by that historical run.</p><ul className="checks">{['Foundry Solidity Tests','React Frontend Build','USENIX 58-Case Executable Benchmark','TypeScript Reachability Engine Kill Tests'].map(name => <li key={name}><span>{name}</span><span className="passed">Passed at source</span></li>)}</ul><External href={`${REPO}/actions/runs/${CI_RUN}`}>Inspect the original CI run</External></article>
+      <article className="evidence-box"><h3>A pinned presentation baseline.</h3><p>The release, source revision, and historical CI form the evidence reference for both pages.</p><dl className="release-dl"><div><dt>Release</dt><dd><External href={`${REPO}/releases/tag/${RELEASE}`}>{RELEASE}</External></dd></div><div><dt>Source SHA</dt><dd className="mono">{SOURCE_COMMIT}</dd></div><div><dt>Review</dt><dd>26 September 2026</dd></div><div><dt>Frontend status</dt><dd>Restyled dashboard; separate UI verification is required for this revision.</dd></div></dl></article>
+    </div>
+    <article className="evidence-box evidence-method"><h3>Read the inclusion criteria before the headline.</h3><p>58 denotes the repository's USENIX-derived chain-address inclusion set. 51/58 is its reported executable witness yield; 51/51 replay and neutralization results are conditional on that discovered-witness subset. They are not detection accuracy for arbitrary wallets.</p><div className="reference-links"><External href={`${SOURCE}/testdata/AEGIS_USENIX_EVALUATION.md`}>Evaluation methodology</External><External href={`${SOURCE}/README.md`}>Architecture and limitations</External><External href={`${SOURCE}/SUBMISSION_EVIDENCE.md`}>Submission evidence</External></div></article>
+  </div>;
+}
+function Architecture() {
+  return <div className="view-content">
+    <div className="view-heading"><div className="eyebrow">The verification contract</div><h3>Follow the state, not just the signature.</h3><p>Finding a concrete loss witness and establishing universal safety are different claims.</p></div>
+    <div className="model-grid">
+      <article className="evidence-box"><span className="card-index">01 / The signing moment</span><h3>No immediate change is not a guarantee.</h3><p>A detached authorization can change no balance when signed while still enabling a later loss-producing path.</p><div className="formula">SimulateCurrentExecution(c, s₀)<br /><span>⇏ SafeFutureCapability(c, s₀)</span></div></article>
+      <article className="evidence-box"><span className="card-index">02 / The search boundary</span><h3>Search the supported action space.</h3><p>The repository's bounded explorer examines modeled transitions up to depth k ≤ 3. Unmodeled actions, deeper paths, or untracked assets remain outside this claim.</p><div className="formula">Found witness π:<br /><span>L(s₀, Tπ(s₀)) &gt; 0</span></div></article>
+      <article className="evidence-box"><span className="card-index">03 / The separate branch</span><h3>Check prevention, not reimbursement.</h3><p>Recovery is tested on a separate copy of the initial state. A previously discovered trace is checked again after the recovery action.</p><div className="formula">Known-trace neutralization:<br /><span>L(sR, Tπ(sR)) = 0</span></div></article>
+      <article className="evidence-box"><span className="card-index">04 / The output contract</span><h3>Unknown stays unknown.</h3><p><code>NO_MODELED_LOSS</code> is not global safety. <code>UNMODELED</code>, invalid responses, and infrastructure failures must not become green success states.</p><div className="formula">No witness found<br /><span>≠ every future path is safe</span></div></article>
+    </div>
+    <div className="branch-note">The local recovery API also returns a bounded portfolio re-search result. The dashboard displays that separately from the known-trace replay; neither is a guarantee against unmodeled capabilities.</div>
+    <External href={`${SOURCE}/README.md`}>Read the full repository formulation</External>
+  </div>;
 }
 
+export function App() {
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initialScenario = urlParams?.get('scenario');
+  const validScenarioId = SCENARIOS.some(s => s.id === initialScenario) ? initialScenario! : SCENARIOS[0].id;
+  const initialTab = urlParams?.get('tab') as Tab;
+  const validTab: Tab = (initialTab === 'architecture' || initialTab === 'benchmark') ? initialTab : 'verifier';
+  const initialStage = urlParams?.has('stage') ? Math.min(3, Math.max(0, parseInt(urlParams.get('stage')!) || 0)) : 0;
+
+  const [selectedId, setSelectedId] = useState(validScenarioId);
+  const [tab, setTab] = useState<Tab>(validTab);
+  const [mode, setMode] = useState<Mode>('fixture');
+  const [health, setHealth] = useState<Health>('checking');
+  const [healthRefresh, setHealthRefresh] = useState(0);
+  const [stage, setStage] = useState(initialStage);
+  const [busy, setBusy] = useState<Busy>(null);
+  const [result, setResult] = useState<RunResult | null>(null);
+  const [receipt, setReceipt] = useState<JsonRecord | null>(null);
+  const [replay, setReplay] = useState<JsonRecord | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Async results are tied to a generation, preventing an old scenario from
+  // replacing the current view after reset, mode change, or scenario selection.
+  const generation = useRef(0);
+  const pending = useRef<AbortController | null>(null);
+  const busyRef = useRef(false);
+  const scenario = SCENARIOS.find(item => item.id === selectedId) ?? SCENARIOS[0];
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    const timer = window.setTimeout(() => controller.abort(), 5000);
+    setHealth('checking');
+    requestJson('/api/health', controller.signal)
+      .then(data => { if (!disposed && !controller.signal.aborted) setHealth(data.status === 'ok' || data.status === 'OK' ? 'available' : 'unavailable'); })
+      .catch(() => { if (!disposed) setHealth('unavailable'); })
+      .finally(() => window.clearTimeout(timer));
+    return () => { disposed = true; window.clearTimeout(timer); controller.abort(); };
+  }, [healthRefresh]);
+  useEffect(() => () => { generation.current++; pending.current?.abort(); }, []);
+
+  const reset = () => {
+    generation.current++;
+    pending.current?.abort(); pending.current = null; busyRef.current = false;
+    setBusy(null); setStage(0); setResult(null); setReceipt(null); setReplay(null); setError(null);
+  };
+  const changeScenario = (id: string) => { if (id !== selectedId) { reset(); setSelectedId(id); } };
+  const changeMode = (next: Mode) => { if (next !== mode) { reset(); setMode(next); } };
+  const runOperation = async (kind: Exclude<Busy, null>, work: (signal: AbortSignal, current: () => boolean) => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const id = ++generation.current;
+    pending.current?.abort();
+    const controller = new AbortController(); pending.current = controller;
+    setBusy(kind); setError(null);
+    const current = () => generation.current === id && !controller.signal.aborted;
+    const timeout = window.setTimeout(() => controller.abort(), kind === 'analysis' ? 45000 : 120000);
+    try { await work(controller.signal, current); }
+    catch (cause) {
+      if (generation.current === id) {
+        setError(controller.signal.aborted
+          ? 'The local request timed out. Its outcome is unknown; no fixture success was substituted. Start a fresh analysis before retrying recovery.'
+          : cause instanceof Error ? cause.message : 'Local engine request failed. No live outcome was accepted.');
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (generation.current === id) { busyRef.current = false; pending.current = null; setBusy(null); }
+    }
+  };
+  const runAnalysis = async () => {
+    if (mode === 'fixture') { setStage(1); setResult({ source: 'fixture', data: { status: 'FOUND_LOSS' } }); return; }
+    await runOperation('analysis', async (signal, current) => {
+      setResult(null); setReceipt(null); setReplay(null);
+      const data = validateAnalysis(await requestJson('/api/analyze', signal, { scenarioId: selectedId }));
+      if (current()) { setResult({ source: 'live', data }); setHealth('available'); setStage(1); }
+    });
+  };
+  const runRecovery = async () => {
+    if (mode === 'fixture') { setStage(3); return; }
+    if (result?.source !== 'live' || result.data.status !== 'FOUND_LOSS' || receipt) return;
+    const runId = text(result.data.runId, '');
+    if (!runId) return;
+    await runOperation('recovery', async (signal, current) => {
+      const recovered = validateRecovery(await requestJson('/api/recover', signal, { runId }), runId);
+      if (!current()) return;
+      setReceipt(recovered);
+      const checked = validateReplay(await requestJson('/api/replay', signal, { runId }), runId);
+      if (current()) { setReplay(checked); setStage(3); }
+    });
+  };
+
+  const foundLoss = mode === 'fixture' || result?.data.status === 'FOUND_LOSS';
+  const ce = result?.source === 'live' && isRecord(result.data.counterexample) ? result.data.counterexample : null;
+  const loss = ce && isRecord(ce.loss) ? ce.loss : null;
+  const plan = result?.source === 'live' && isRecord(result.data.recoveryPlan) ? result.data.recoveryPlan : null;
+  const portfolio = receipt && isRecord(receipt.postRecoveryExplore) ? receipt.postRecoveryExplore : null;
+  const canStage = (index: number) => mode === 'fixture' || index === 0 ||
+    (index === 1 && !!result) || (index === 2 && !!result && foundLoss) || (index === 3 && !!replay);
+  const next = () => {
+    if (busy) return;
+    if (stage === 0) { if (result) setStage(1); else void runAnalysis(); }
+    else if (stage === 1 && foundLoss) setStage(2);
+    else if (stage === 2) { if (replay) setStage(3); else void runRecovery(); }
+    else reset();
+  };
+  const nextLabel = busy === 'analysis' ? 'Running local verifier…' : busy === 'recovery' ? 'Checking recovery & replay…' :
+    stage === 0 ? mode === 'fixture' ? 'View fixture loss →' : result ? 'View analysis result →' : 'Run local verifier →' :
+    stage === 1 ? foundLoss ? 'View recovery branch →' : 'Start a new analysis ↺' :
+    stage === 2 ? mode === 'fixture' ? 'View recorded check →' : replay ? 'View replay result →' : 'Execute recovery & verify replay →' : 'Start again ↺';
+  const nextDisabled = !!busy || (mode === 'live' && stage === 2 && !replay && (!!receipt || !!error || !plan));
+  const fixtureText = [scenario.signing, scenario.lossDescription, scenario.recovery, scenario.replay][stage];
+  const status = text(result?.data.status, 'Not run');
+  const liveTitles: Record<string, string> = {
+    FOUND_LOSS: 'The engine returned a loss witness.', NO_MODELED_LOSS: 'No modeled loss found within the bound.',
+    UNMODELED: 'The engine cannot model this result.', INVALID_CAPABILITY: 'The capability was not accepted.',
+    PROSPECTIVE_RISK: 'The engine reported prospective risk.',
+  };
+  const stageTitle = stage === 0 ? 'Nothing moves when you sign.' :
+    stage === 1 ? mode === 'fixture' ? 'A later path can produce loss.' : liveTitles[status] ?? 'Analysis result unavailable.' :
+    stage === 2 ? 'Test recovery on a separate branch.' : mode === 'fixture' ? 'Check the known trace again.' :
+    replay?.mitigated === true ? 'The engine reports zero known-trace loss.' : 'The replay still reports tracked loss.';
+  const liveText = stage === 0 ? 'Run the existing local engine against the selected bundled scenario. The fixture details below describe the scenario, not a fresh observation of your wallet.' :
+    stage === 1 ? status === 'FOUND_LOSS' ? 'The metrics below come from this API response, not from the illustrative 10,000-USDC fixture. Inspect the response for the complete returned evidence.' : text(result?.data.reason, 'This status does not establish global safety. Recovery is unavailable unless the engine returns a complete loss witness.') :
+    stage === 2 ? text(plan?.description, 'Review the engine-generated recovery plan. The existing local backend executes the recovery and known-trace check; this page does not connect to a wallet.') : text(replay?.message, 'No replay result has been accepted.');
+  const branchNote = stage === 0 ? 'Initial fixture state. No immediate balance change is not a safety guarantee about later use of the authorization.' :
+    stage === 1 ? 'Loss branch only. The recovery branch starts again from the original pre-loss state; it is not a refund.' :
+    stage === 2 ? 'Separate initial-state branch, before loss. Cancelling or leaving the view does not roll back a backend operation already sent.' :
+    'Known-trace check on the recovered branch. Other paths, assets, and live ordering risks remain outside this claim.';
+  const metric = mode === 'fixture' ? ['0.00', '10,000.00', '10,000.00', '0.00'][stage] :
+    stage === 0 ? '—' : stage === 1 && loss ? text(loss.formatted) : stage === 3 && replay ? text(replay.assetsLost) : '—';
+  const metricLabel = mode === 'fixture' ? ['Immediate balance change', 'Modeled loss in the fixture', 'Starting balance on the clean branch', 'Loss on the recorded replay check'][stage] :
+    stage === 0 ? 'Live verification not run' : stage === 1 ? loss ? 'Engine-reported tracked loss' : 'No loss metric returned' : stage === 2 ? 'Recovery plan — not executed here yet' : 'Engine-reported replay loss';
+  const metricUnit = mode === 'fixture' ? 'test USDC · bundled fixture' : stage === 3 ? 'raw token units · exact API value' : loss && stage === 1 ? `${text(loss.symbol)} · local API response` : 'Not a measured zero';
+  const tone = stage === 1 && foundLoss || stage === 3 && mode === 'live' && replay?.mitigated === false ? 'loss' : mode === 'live' && stage === 1 ? 'unknown' : 'neutral';
+  const phase = mode === 'fixture' ? ['Initial fixture', 'Fixture loss', 'Separate branch', 'Recorded check'][stage] :
+    stage === 0 ? 'Local mode' : stage === 1 ? status : stage === 2 ? 'Plan review' : 'API replay';
+
+  return <>
+    <a className="skip" href="#workspace">Skip to dashboard</a>
+    <header className="topbar"><div className="wrap nav">
+      <a className="brand" href="#main" aria-label="Aegis7702 home"><Shield />Aegis<span>7702</span></a>
+      <nav aria-label="Main navigation"><a href="#workspace" className="nav-dashboard" aria-current="page">Dashboard</a><a href="/judge-demo.html" className="nav-demo">Judge demo</a><a href="#scope" className="nav-secondary">Scope</a><a className="nav-repo" href={REPO} target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
+    </div></header>
+    <main id="main"><Hero /><Snapshot />
+      <section id="workspace" className="section"><div className="wrap">
+        <div className="section-head"><div><div className="eyebrow">01 / Main interactive dashboard</div><h2>Inspect. Verify. Check recovery.</h2></div><p>The same visual language as the judge demo, with the controls and evidence needed to inspect each result.</p></div>
+        <div className="workspace-tabs" role="tablist" aria-label="Dashboard views">{TABS.map((item, index) => <button key={item.id} id={`tab-${item.id}`} type="button" role="tab" aria-selected={tab === item.id} aria-controls={`panel-${item.id}`} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={event => {
+          const nextIndex = event.key === 'ArrowRight' ? (index + 1) % TABS.length : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : -1;
+          if (nextIndex >= 0) { event.preventDefault(); setTab(TABS[nextIndex].id); document.getElementById(`tab-${TABS[nextIndex].id}`)?.focus(); }
+        }}>{item.label}</button>)}</div>
+        <div className="demo-shell app-shell" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+          {tab === 'verifier' ? <>
+            <div className="demo-toolbar"><div><div className="mode">{mode === 'fixture' ? 'Fixture walkthrough · no live execution' : 'Local engine · API-backed results'}</div><p className="mode-note">{mode === 'fixture' ? 'Bundled examples are never presented as this session’s live results.' : 'Uses only the existing local scenario endpoints. No wallet connection.'}</p></div><div className="engine-health"><span className={`health-dot ${health}`} aria-hidden="true" /><span>{health === 'checking' ? 'Checking local API…' : health === 'available' ? 'Local API available' : 'Local API unavailable'}</span><button type="button" aria-label="Recheck local engine connection" onClick={() => setHealthRefresh(value => value + 1)} disabled={health === 'checking'}>↻</button></div></div>
+            <div className="controls-row"><div className="segmented" role="group" aria-label="Execution mode"><button type="button" aria-pressed={mode === 'fixture'} onClick={() => changeMode('fixture')}>Fixture walkthrough</button><button type="button" aria-pressed={mode === 'live'} onClick={() => changeMode('live')}>Local engine</button></div><span className="control-hint">{mode === 'fixture' ? 'Offline presentation values' : 'Explicit execution on your local backend'}</span></div>
+            <div className="scenario-group" role="group" aria-label="Test scenario">{SCENARIOS.map(item => <button type="button" key={item.id} className="scenario-btn" aria-pressed={selectedId === item.id} onClick={() => changeScenario(item.id)}><span>{item.name}</span><small>{item.protocol}</small></button>)}</div>
+            {mode === 'live' && health === 'unavailable' && <div className="notice notice-warning"><strong>Local API not detected.</strong> The selected mode remains live. Start your engine and recheck the connection, or explicitly select the fixture walkthrough. Failed requests will not fall back to successful fixtures.</div>}
+            {error && <div className="notice notice-error" role="alert"><strong>Live operation not verified.</strong><span>{error}</span><button type="button" onClick={reset} className="text-button">Reset local view</button></div>}
+            <div className="demo-grid">
+              <div className="demo-story"><div className="demo-caption">{scenario.name} / {mode === 'fixture' ? 'Recorded illustration' : 'Local test environment'}</div><h3>{stageTitle}</h3><p>{mode === 'fixture' ? fixtureText : liveText}</p>
+                <div className="steps" role="group" aria-label="Verification stages">{STAGES.map((label, index) => <button key={label} type="button" className={`step ${index < stage ? 'past' : ''}`} aria-current={stage === index ? 'step' : undefined} disabled={!!busy || !canStage(index)} onClick={() => setStage(index)}><b>0{index + 1}</b>{label}</button>)}</div>
+                <div className="branch-note">{branchNote}</div>
+                <div className="demo-buttons"><button type="button" className="btn btn-secondary" disabled={stage === 0 || !!busy} onClick={() => setStage(value => value - 1)}>← Back</button><button type="button" className="btn btn-primary" onClick={next} disabled={nextDisabled}>{nextLabel}</button><button type="button" className="btn btn-reset" onClick={reset}>{busy ? 'Cancel / reset view' : 'Reset'}</button></div>
+                {mode === 'live' && stage === 2 && receipt && !replay && <p className="inline-caution">Recovery was submitted, but no complete replay result was accepted. Reset and start a fresh analysis; do not infer success.</p>}
+                {mode === 'live' && stage === 2 && !plan && <p className="inline-caution">The engine did not return a recovery plan. No recovery request can be sent from this view.</p>}
+              </div>
+              <aside className="evidence-card" data-tone={tone} aria-label="Current result evidence"><div className="card-top"><span>{mode === 'fixture' ? 'Fixture evidence' : 'Session evidence'}</span><span className="phase-badge">{phase.replaceAll('_', ' ')}</span></div><div className="metric-label">{metricLabel}</div><div className="metric-number" data-testid="current-metric">{metric}</div><div className="metric-unit">{metricUnit}</div>
+                <div className="result-title">{stage === 0 ? mode === 'fixture' ? 'No execution at the signing moment' : 'Waiting for explicit verification' : stage === 1 ? mode === 'fixture' ? `${scenario.trace.length}-step recorded loss path` : status : stage === 2 ? mode === 'fixture' ? scenario.strategy : text(plan?.strategy, 'Recovery plan unavailable') : mode === 'fixture' ? 'Fixture outcome: 10,000 test USDC preserved' : replay?.mitigated === true ? 'API reports known-trace neutralization' : 'API reports remaining tracked loss'}</div>
+                <p className="result-note">{mode === 'fixture' ? 'This is a displayed fixture outcome, not a new verifier execution. Starting balance: 10,000 test USDC.' : stage === 3 ? `Final tracked balance: ${text(replay?.finalVictimBalance)}. Replay disposition: ${replay?.reverted === true ? 'reported blocked or reverted' : replay?.reverted === false ? 'no revert reported' : 'not returned'}.` : 'Metrics and status are taken only from the accepted local API response. Missing values remain unknown.'}</p>
+                {mode === 'live' && result && <div className="run-id mono">Run: {text(result.data.runId)}</div>}
+                <a className="source-link" href={`${SOURCE}/app/src/App.tsx`} target="_blank" rel="noopener noreferrer">{mode === 'fixture' ? 'Source fixture definitions ↗' : 'Original dashboard API integration ↗'}</a>
+              </aside>
+            </div>
+            <div className="inspection-area"><div className="inspection-grid">
+              <CapabilityPanel scenario={scenario} />
+              <section className="detail-card"><div className="detail-card-head"><span className="eyebrow">{mode === 'fixture' ? 'Recorded path' : 'Returned evidence'}</span><span className="badge">{mode === 'fixture' ? 'Fixture only' : result ? 'API result' : 'Not run'}</span></div><h3>{mode === 'fixture' ? 'Trace and branch context' : 'Local analysis evidence'}</h3>
+                {mode === 'fixture' ? <><ol className="trace-list">{scenario.trace.map((item, index) => <li key={item.title}><span className="trace-number">0{index + 1}</span><div><h4>{item.title}</h4><p>{item.description}</p><span className="trace-balance mono">{item.balance}</span></div></li>)}</ol><p className="detail-note">Illustrative loss branch. The recovery check uses a separate pre-loss state.</p></> : result ? <><dl className="release-dl"><div><dt>Status</dt><dd>{status}</dd></div><div><dt>Depth</dt><dd>{ce ? text(ce.depth) : 'No witness returned'}</dd></div><div><dt>Tracked loss</dt><dd>{loss ? `${text(loss.formatted)} ${text(loss.symbol)}` : 'Not returned'}</dd></div></dl>{ce && Array.isArray(ce.trace) && <ol className="trace-list">{ce.trace.map((item, index) => <li key={index}><span className="trace-number">0{index + 1}</span><div><h4>{isRecord(item) ? text(item.id, text(item.actionId, 'Returned action')) : 'Returned action'}</h4><p>{isRecord(item) ? text(item.description, 'Details are available in the raw API response.') : 'Inspect the API response.'}</p></div></li>)}</ol>}<RawDetails title="Inspect analysis response" data={result.data} /></> : <div className="empty-state"><span aria-hidden="true">◎</span><p>No local analysis has run.</p><small>The dashboard will not use the fixture's loss or trace as live evidence.</small></div>}
+              </section>
+            </div>
+            {receipt && <section className="detail-card receipt-card"><div className="detail-card-head"><span className="eyebrow">Local recovery receipt</span><span className="badge">{text(receipt.status)}</span></div><h3>Recovery and replay are separate checks.</h3><dl className="release-dl"><div><dt>Transaction</dt><dd className="mono">{text(receipt.txHash)}</dd></div><div><dt>Gas used</dt><dd>{text(receipt.gasUsed)}</dd></div><div><dt>Portfolio check</dt><dd>{text(portfolio?.status, 'Not returned — not verified')}</dd></div><div><dt>Known trace</dt><dd>{!replay ? 'No accepted replay result' : replay.mitigated === true ? 'API reports zero tracked loss' : 'API reports remaining tracked loss'}</dd></div></dl>{portfolio?.verified !== true && <div className="notice notice-warning">The post-recovery portfolio check is not verified. A successful known-trace replay must not be presented as complete recovery.</div>}<RawDetails title="Inspect recovery response" data={receipt} />{replay && <RawDetails title="Inspect replay response" data={replay} />}</section>}
+            </div>
+            <div className="demo-disclaimer">{mode === 'fixture' ? 'Fixture mode: no analysis, recovery, or replay request is sent. A separate read-only health check detects whether the local API is available.' : 'Local mode: existing /api/analyze, /api/recover, and /api/replay endpoints only. Results are backend reports, not an independent security certification.'}</div>
+          </> : tab === 'architecture' ? <Architecture /> : <Evidence />}
+        </div>
+        <div className="dashboard-footnote"><span>Same source baseline. Clearly separated evidence.</span><a href="/judge-demo.html#walkthrough">Open the presentation walkthrough ↗</a></div>
+      </div></section><Scope />
+    </main>
+    <footer><div className="wrap footer-row"><span>Aegis7702 · Interactive dashboard & local verification UI</span><span>Prepared for Dr. Lew Kai Liang · Source snapshot: v1.0.13</span></div></footer>
+    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{scenario.name}. {mode === 'fixture' ? 'Fixture mode' : 'Local engine mode'}. Stage {stage + 1} of 4: {STAGES[stage]}. {busy ? nextLabel : stageTitle}</div>
+  </>;
+}
+function CapabilityPanel({ scenario }: { scenario: Scenario }) {
+  return <section className="detail-card"><div className="detail-card-head"><span className="eyebrow">Capability inspection</span><span className="badge">Fixture metadata</span></div><h3>{scenario.capabilityLabel}</h3><p className="detail-note">Reference values from the bundled scenario, not a live wallet observation. Engine-generated addresses and signatures may differ; inspect the API response for that run.</p><dl className="capability-fields">{Object.entries(scenario.fields).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className="mono">{value}</dd></div>)}</dl></section>;
+}
 export default App;

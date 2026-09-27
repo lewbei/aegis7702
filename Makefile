@@ -1,4 +1,4 @@
-.PHONY: all test test-contracts test-engine test-benchmark build demo clean
+.PHONY: all test test-contracts test-engine test-benchmark build demo clean video
 
 all: test-contracts test-engine build
 
@@ -25,3 +25,7 @@ demo:
 	@trap 'kill 0' EXIT; \
 	(cd engine && npm run server) & \
 	(cd app && npm run dev)
+
+video:
+	@echo "Rendering Aegis7702 walkthrough video (1080p @ 30fps)..."
+	python3 scripts/render_demo_video.py
